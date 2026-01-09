@@ -15,6 +15,7 @@ from random import randint
 from utils.loss_utils import l1_loss
 from gaussian_renderer import render_flow as render
 
+import time
 import sys
 from scene import  Scene
 from scene.flexible_deform_model import GaussianModel
@@ -50,8 +51,8 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
     bg_color = [1, 1, 1] if dataset.white_background else [0, 0, 0]
     background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
 
-    iter_start = torch.cuda.Event(enable_timing = True)
-    iter_end = torch.cuda.Event(enable_timing = True)
+    # iter_start = torch.cuda.Event(enable_timing = True)
+    # iter_end = torch.cuda.Event(enable_timing = True)
 
     viewpoint_stack = None
 
@@ -68,7 +69,8 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         
     for iteration in range(first_iter, final_iter+1):        
 
-        iter_start.record()
+        t_start = time.time()
+        # iter_start.record()
         gaussians.update_learning_rate(iteration)
         # Every 1000 its we increase the levels of SH up to a maximum degree
         if iteration % 500 == 0:
@@ -134,7 +136,9 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         viewspace_point_tensor_grad = torch.zeros_like(viewspace_point_tensor)
         for idx in range(0, len(viewspace_point_tensor_list)):
             viewspace_point_tensor_grad = viewspace_point_tensor_grad + viewspace_point_tensor_list[idx].grad
-        iter_end.record()
+        # iter_end.record()
+        torch.cuda.synchronize()
+        iter_time = time.time() - t_start
 
         with torch.no_grad():
             # Progress bar
@@ -149,7 +153,8 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
 
             # Log and save
             timer.pause()
-            training_report(tb_writer, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, [pipe, background])
+            # training_report(tb_writer, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, [pipe, background])
+            training_report(tb_writer, iteration, Ll1, loss, loss, iter_time, testing_iterations, scene, render, [pipe, background])
             if (iteration in saving_iterations):
                 print("\n[ITER {}] Saving Gaussians".format(iteration))
                 scene.save(iteration, 'fine')
