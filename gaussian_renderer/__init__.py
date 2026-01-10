@@ -43,7 +43,7 @@ def render_flow(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Ten
         scale_modifier=scaling_modifier,
         viewmatrix=viewpoint_camera.world_view_transform.cuda(),
         projmatrix=viewpoint_camera.full_proj_transform.cuda(),
-        sh_degree=pc.active_sh_degree,
+        sh_degree=0,
         campos=viewpoint_camera.camera_center.cuda(),
         prefiltered=False,
         debug=pipe.debug
@@ -101,25 +101,26 @@ def render_flow(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Ten
 
     # If precomputed colors are provided, use them. Otherwise, if it is desired to precompute colors
     # from SHs in Python, do it. If not, then SH -> RGB conversion will be done by rasterizer.
-    shs = None
-    colors_precomp = None
-    if override_color is None:
-        if pipe.convert_SHs_python:
-            shs_view = pc.get_features.transpose(1, 2).view(-1, 3, (pc.max_sh_degree+1)**2)
-            dir_pp = (pc.get_xyz - viewpoint_camera.camera_center.cuda().repeat(pc.get_features.shape[0], 1))
-            dir_pp_normalized = dir_pp/dir_pp.norm(dim=1, keepdim=True)
-            sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
-            colors_precomp = torch.clamp_min(sh2rgb + 0.5, 0.0)
-        else:
-            shs = pc.get_features
-    else:
-        colors_precomp = override_color
+    # shs = None
+    # colors_precomp = None
+    # if override_color is None:
+    #     if pipe.convert_SHs_python:
+    #         shs_view = pc.get_features.transpose(1, 2).view(-1, 3, (pc.max_sh_degree+1)**2)
+    #         dir_pp = (pc.get_xyz - viewpoint_camera.camera_center.cuda().repeat(pc.get_features.shape[0], 1))
+    #         dir_pp_normalized = dir_pp/dir_pp.norm(dim=1, keepdim=True)
+    #         sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
+    #         colors_precomp = torch.clamp_min(sh2rgb + 0.5, 0.0)
+    #     else:
+    #         shs = pc.get_features
+    # else:
+    #     colors_precomp = override_color
 
+    colors_precomp = pc.get_features
     # Rasterize visible Gaussians to image, obtain their radii (on screen). 
     rendered_image, radii, depth = rasterizer(
         means3D = means3D_final,
         means2D = means2D,
-        shs = shs,
+        shs = None,
         colors_precomp = colors_precomp,
         opacities = opacity,
         scales = scales_final,

@@ -34,13 +34,13 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     render_path = os.path.join(model_path, name, "ours_{}".format(iteration), "renders")
     depth_path = os.path.join(model_path, name, "ours_{}".format(iteration), "depth")
     gts_path = os.path.join(model_path, name, "ours_{}".format(iteration), "gt")
-    gtdepth_path = os.path.join(model_path, name, "ours_{}".format(iteration), "gt_depth")
+    gt_depth_path = os.path.join(model_path, name, "ours_{}".format(iteration), "gt_depth")
     masks_path = os.path.join(model_path, name, "ours_{}".format(iteration), "masks")
 
     makedirs(render_path, exist_ok=True)
     makedirs(depth_path, exist_ok=True)
     makedirs(gts_path, exist_ok=True)
-    makedirs(gtdepth_path, exist_ok=True)
+    makedirs(gt_depth_path, exist_ok=True)
     makedirs(masks_path, exist_ok=True)
     
     render_images = []
@@ -108,7 +108,7 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     if len(gt_depths) != 0:
         for image in tqdm(gt_depths):
             image = image.cpu().squeeze().numpy().astype(np.uint8)
-            cv2.imwrite(os.path.join(gtdepth_path, '{0:05d}'.format(count) + ".png"), image)
+            cv2.imwrite(os.path.join(gt_depth_path, '{0:05d}'.format(count) + ".png"), image)
             count += 1
             
     render_array = torch.stack(render_images, dim=0).permute(0, 2, 3, 1)
@@ -126,7 +126,7 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
 
     if reconstruct:
         print('file name:', name)
-        reconstruct_point_cloud(render_images, mask_list, render_depths, camera_parameters, name, crop_size)
+        reconstruct_point_cloud(render_images, mask_list, render_depths, camera_parameters, name, model_path, crop_size)
 
 def render_sets(dataset : ModelParams, hyperparam, iteration : int, pipeline : PipelineParams, skip_train : bool, skip_test : bool, skip_video: bool, reconstruct_train: bool, reconstruct_test: bool, reconstruct_video: bool):
     with torch.no_grad():
@@ -143,11 +143,12 @@ def render_sets(dataset : ModelParams, hyperparam, iteration : int, pipeline : P
         if not skip_video:
             render_set(dataset.model_path,"video",scene.loaded_iter, scene.getVideoCameras(),gaussians,pipeline,background, False, render_test=True, reconstruct=reconstruct_video, crop_size=20)
 
-def reconstruct_point_cloud(images, masks, depths, camera_parameters, name, crop_left_size=0):
+def reconstruct_point_cloud(images, masks, depths, camera_parameters, name, model_path, crop_left_size=0):
     import cv2
     import copy
-    output_frame_folder = os.path.join("reconstruct", name)
-    os.makedirs(output_frame_folder, exist_ok=True)
+    makedirs(os.path.join(model_path, "reconstruct"), exist_ok=True)
+    output_frame_folder = os.path.join(model_path, "reconstruct", name)
+    makedirs(output_frame_folder, exist_ok=True)
     frames = np.arange(len(images))
     # frames = [0]
     focal_x, focal_y, width, height = camera_parameters

@@ -73,8 +73,8 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         # iter_start.record()
         gaussians.update_learning_rate(iteration)
         # Every 1000 its we increase the levels of SH up to a maximum degree
-        if iteration % 500 == 0:
-            gaussians.oneupSHdegree()
+        # if iteration % 500 == 0:
+        #     gaussians.oneupSHdegree()
 
         idx = randint(0, len(viewpoint_stack)-1)
         viewpoint_cams = [viewpoint_stack[idx]]
