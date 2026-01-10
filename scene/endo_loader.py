@@ -121,7 +121,7 @@ class EndoNeRF_Dataset(object):
         """
         
         # coordinate transformation 
-        if 'stereo_' in self.root_dir:
+        if 'stereomis' in self.root_dir.lower():
             poses_arr = np.load(os.path.join(self.root_dir, "poses_bounds.npy"))
             try:
                 poses = poses_arr[:, :-2].reshape([-1, 3, 5])  # (N_cams, 3, 5)
@@ -192,7 +192,7 @@ class EndoNeRF_Dataset(object):
             mask_path = self.masks_paths[idx]
             mask = Image.open(mask_path)
             # StereoMIS 
-            if 'stereo_' in self.root_dir:
+            if 'stereomis' in self.root_dir.lower():
                 mask = np.array(mask)
                 if len(mask.shape) > 2:
                     mask = (mask[..., 0]>0).astype(np.uint8)
@@ -237,7 +237,7 @@ class EndoNeRF_Dataset(object):
         depth_mask[np.bitwise_and(depth<close_depth, depth!=0)] = 0
         depth_mask[depth==0] = 0
         depth[depth_mask==0] = 0
-        if 'stereo_' in self.root_dir:
+        if 'stereomis' in self.root_dir.lower():
             mask = np.array(Image.open(self.masks_paths[0]))
             if len(mask.shape) > 2:
                 mask = (mask[..., 0]>0).astype(np.uint8) 
@@ -292,7 +292,7 @@ class EndoNeRF_Dataset(object):
             depth = np.array(Image.open(self.depth_paths[j]))
             color = np.array(Image.open(self.image_paths[j]))/255.0
             # mask = 1 - np.array(Image.open(self.masks_paths[0]))/255.0   
-            if 'stereo_' in self.root_dir:
+            if 'stereomis' in self.root_dir.lower():
                 mask = np.array(Image.open(self.masks_paths[j]))
                 if len(mask.shape) > 2:
                     mask = (mask[..., 0]>0).astype(np.uint8)
