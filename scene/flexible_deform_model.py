@@ -63,6 +63,12 @@ class GaussianModel:
         self.spatial_lr_scale = 0
         self.setup_functions()
 
+        self._irradiance_mlp = nn.Sequential(
+            nn.Linear(36, 36),
+            nn.ReLU(inplace=True),
+            nn.Linear(36, 3),
+        ).cuda()
+
     def capture(self):
         return (
             self.active_sh_degree,
@@ -118,12 +124,22 @@ class GaussianModel:
     def get_coef(self):
         return self._coefs, self.args.poly_order_num, self.args.fs_order_num
     
+    # @property
+    # def get_features(self):
+    #     # features_dc = self._features_dc
+    #     # features_rest = self._features_rest
+    #     # return torch.cat((features_dc, features_rest), dim=1)
+    #     return self._features
+    
     @property
-    def get_features(self):
-        # features_dc = self._features_dc
-        # features_rest = self._features_rest
-        # return torch.cat((features_dc, features_rest), dim=1)
-        return self._features
+    def get_irradiance(self):
+        log_irradiance = self._irradiance_mlp(self._features)
+        return torch.exp(log_irradiance)
+    
+    @property
+    def get_color(self):
+        irradiance = self.get_irradiance
+        return 1 / (1 + torch.exp(-irradiance))
     
     @property
     def get_opacity(self):
@@ -143,7 +159,6 @@ class GaussianModel:
         # features = torch.zeros((fused_color.shape[0], 3, (self.max_sh_degree + 1) ** 2)).float().cuda()
         # features[:, :3, 0 ] = fused_color
         # features[:, 3:, 1:] = 0.0
-        features = torch.tensor(np.asarray(pcd.colors)).float().cuda()
 
         print("Number of points at initialisation : ", fused_point_cloud.shape[0])
 
@@ -154,6 +169,7 @@ class GaussianModel:
 
         
         N = fused_point_cloud.shape[0]
+        features = torch.zeros((N, 36), dtype=torch.float, device="cuda")
         weight_coefs = torch.zeros((N, self.args.ch_num, self.args.curve_num))
         position_coefs = torch.zeros((N, self.args.ch_num, self.args.curve_num)) + torch.linspace(0,1,self.args.curve_num)
         shape_coefs = torch.zeros((N, self.args.ch_num, self.args.curve_num)) + self.args.init_param
@@ -186,7 +202,8 @@ class GaussianModel:
             {'params': [self._opacity], 'lr': training_args.opacity_lr, "name": "opacity"},
             {'params': [self._scaling], 'lr': training_args.scaling_lr, "name": "scaling"},
             {'params': [self._rotation], 'lr': training_args.rotation_lr, "name": "rotation"},
-            {'params': [self._coefs], 'lr': training_args.deformation_lr_init * self.spatial_lr_scale, "name": "coefs"}
+            {'params': [self._coefs], 'lr': training_args.deformation_lr_init * self.spatial_lr_scale, "name": "coefs"},
+            {'params': self._irradiance_mlp.parameters(), 'lr': training_args.irradiance_mlp_lr, "name": "irradiance_mlp"}
         ]
 
         self.optimizer = torch.optim.Adam(l, lr=0.0, eps=1e-15)
@@ -326,6 +343,15 @@ class GaussianModel:
         elements[:] = list(map(tuple, attributes))
         el = PlyElement.describe(elements, 'vertex')
         PlyData([el]).write(path)
+
+    def save_irradiance(self, path):
+        mkdir_p(os.path.dirname(path))
+        torch.save(self._irradiance_mlp.state_dict(), path)
+
+    def load_irradiance(self, path, map_location="cuda"):
+        state = torch.load(path, map_location=map_location)
+        self._irradiance_mlp.load_state_dict(state)
+        self._irradiance_mlp.to("cuda")
         
     def reset_opacity(self):
         opacities_new = inverse_sigmoid(torch.min(self.get_opacity, torch.ones_like(self.get_opacity)*0.01))

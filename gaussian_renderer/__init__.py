@@ -115,7 +115,7 @@ def render_flow(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Ten
     # else:
     #     colors_precomp = override_color
 
-    colors_precomp = pc.get_features
+    colors_precomp = pc.get_color
     # Rasterize visible Gaussians to image, obtain their radii (on screen). 
     rendered_image, radii, depth = rasterizer(
         means3D = means3D_final,

@@ -40,7 +40,7 @@ class Scene:
         
         if os.path.exists(os.path.join(args.source_path, "poses_bounds.npy")) and args.extra_mark == 'endonerf':
             scene_info = sceneLoadTypeCallbacks["endonerf"](args.source_path)
-            print("Found poses_bounds.py and extra marks with EndoNeRf")
+            print("Found poses_bounds.py and extra marks with EndoNeRF")
         elif os.path.exists(os.path.join(args.source_path, "point_cloud.obj")) or os.path.exists(os.path.join(args.source_path, "left_point_cloud.obj")):
             scene_info = sceneLoadTypeCallbacks["scared"](args.source_path, args.white_background, args.eval)
             print("Found point_cloud.obj, assuming SCARED data!")
@@ -72,6 +72,7 @@ class Scene:
                                                     "point_cloud",
                                                     "iteration_" + str(self.loaded_iter),
                                                    ))
+            self.gaussians.load_irradiance(os.path.join(self.model_path, "irradiance_mlp.pth"))
         else:
             self.gaussians.create_from_pcd(scene_info.point_cloud, args.camera_extent, self.maxtime)
 
@@ -82,6 +83,7 @@ class Scene:
             point_cloud_path = os.path.join(self.model_path, "point_cloud/iteration_{}".format(iteration))
         self.gaussians.save_ply(os.path.join(point_cloud_path, "point_cloud.ply"))
         # self.gaussians.save_deformation(point_cloud_path)
+        self.gaussians.save_irradiance(os.path.join(self.model_path, "irradiance_mlp.pth"))
     
     def getTrainCameras(self, scale=1.0):
         return self.train_camera
