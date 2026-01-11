@@ -72,7 +72,8 @@ class Scene:
                                                     "point_cloud",
                                                     "iteration_" + str(self.loaded_iter),
                                                    ))
-            self.gaussians.load_irradiance(os.path.join(self.model_path, "irradiance_mlp.pth"))
+            self.gaussians.load_color_mlp(os.path.join(self.model_path, "color_mlp.pth"))
+            self.gaussians.load_tone_mapper(os.path.join(self.model_path, "tone_mapper.pth"))
         else:
             self.gaussians.create_from_pcd(scene_info.point_cloud, args.camera_extent, self.maxtime)
 
@@ -83,7 +84,8 @@ class Scene:
             point_cloud_path = os.path.join(self.model_path, "point_cloud/iteration_{}".format(iteration))
         self.gaussians.save_ply(os.path.join(point_cloud_path, "point_cloud.ply"))
         # self.gaussians.save_deformation(point_cloud_path)
-        self.gaussians.save_irradiance(os.path.join(self.model_path, "irradiance_mlp.pth"))
+        self.gaussians.save_color_mlp(os.path.join(self.model_path, "color_mlp.pth"))
+        self.gaussians.save_tone_mapper(os.path.join(self.model_path, "tone_mapper.pth"))
     
     def getTrainCameras(self, scale=1.0):
         return self.train_camera

@@ -83,7 +83,8 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         if (iteration - 1) == debug_from:
             pipe.debug = True
             
-        images = []
+        ldr_images = []
+        hdr_images = []
         depths = []
         gt_images = []
         gt_depths = []
@@ -94,14 +95,24 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         viewspace_point_tensor_list = []
         
         for viewpoint_cam in viewpoint_cams:
-            render_pkg = render(viewpoint_cam, gaussians, pipe, background)
-            image, depth, viewspace_point_tensor, visibility_filter, radii = \
-                render_pkg["render"], render_pkg["depth"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
+            if idx % 24 < 6:
+                exposure_time = 0.5
+            elif idx % 24 < 12:
+                exposure_time = 1.0
+            elif idx % 24 < 18:
+                exposure_time = 1.5
+            else:
+                exposure_time = 1.0
+
+            render_pkg = render(viewpoint_cam, gaussians, pipe, background, exposure_time)
+            image_ldr, image_hdr, depth, viewspace_point_tensor, visibility_filter, radii = \
+                render_pkg["render_ldr"], render_pkg["render_hdr"], render_pkg["depth"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
             gt_image = viewpoint_cam.original_image.cuda().float()
             gt_depth = viewpoint_cam.original_depth.cuda().float()
             mask = viewpoint_cam.mask.cuda()
             
-            images.append(image.unsqueeze(0))
+            ldr_images.append(image_ldr.unsqueeze(0))
+            hdr_images.append(image_hdr.unsqueeze(0))
             depths.append(depth.unsqueeze(0))
             gt_images.append(gt_image.unsqueeze(0))
             gt_depths.append(gt_depth.unsqueeze(0))
@@ -112,13 +123,14 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
 
         radii = torch.cat(radii_list,0).max(dim=0).values
         visibility_filter = torch.cat(visibility_filter_list).any(dim=0)
-        image_tensor = torch.cat(images,0)
+        ldr_image_tensor = torch.cat(ldr_images, 0)
+        hdr_image_tensor = torch.cat(hdr_images, 0)
         depth_tensor = torch.cat(depths, 0)
         gt_image_tensor = torch.cat(gt_images,0)
         gt_depth_tensor = torch.cat(gt_depths, 0)
         mask_tensor = torch.cat(masks, 0)
         
-        Ll1 = l1_loss(image_tensor, gt_image_tensor, mask_tensor)
+        Ll1 = l1_loss(ldr_image_tensor, gt_image_tensor, mask_tensor)
         
         if (gt_depth_tensor!=0).sum() < 10:
             depth_loss = torch.tensor(0.).cuda()
@@ -129,7 +141,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
             depth_loss = l1_loss(depth_tensor, gt_depth_tensor, mask_tensor)
         
       
-        psnr_ = psnr(image_tensor, gt_image_tensor, mask_tensor).mean().double()        
+        psnr_ = psnr(ldr_image_tensor, gt_image_tensor, mask_tensor).mean().double()        
         loss = Ll1 + depth_loss 
         
         loss.backward()

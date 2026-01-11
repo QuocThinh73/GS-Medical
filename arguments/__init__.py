@@ -126,7 +126,8 @@ class OptimizationParams(ParamGroup):
         self.opacity_threshold_fine_init = 0.005
         self.opacity_threshold_fine_after = 0.005
 
-        self.irradiance_mlp_lr = 0.0005
+        self.color_mlp_lr = 0.0005
+        self.tone_mapper_lr = 0.0005
         
         super().__init__(parser, "Optimization Parameters")
 

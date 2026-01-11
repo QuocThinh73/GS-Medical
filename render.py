@@ -31,19 +31,19 @@ to8b = lambda x : (255*np.clip(x.cpu().numpy(),0,1)).astype(np.uint8)
 
 def render_set(model_path, name, iteration, views, gaussians, pipeline, background,\
     no_fine, render_test=False, reconstruct=False, crop_size=0):
-    render_path = os.path.join(model_path, name, "ours_{}".format(iteration), "renders")
+    ldr_render_path = os.path.join(model_path, name, "ours_{}".format(iteration), "ldr_renders")
     depth_path = os.path.join(model_path, name, "ours_{}".format(iteration), "depth")
     gts_path = os.path.join(model_path, name, "ours_{}".format(iteration), "gt")
     gt_depth_path = os.path.join(model_path, name, "ours_{}".format(iteration), "gt_depth")
     masks_path = os.path.join(model_path, name, "ours_{}".format(iteration), "masks")
 
-    makedirs(render_path, exist_ok=True)
+    makedirs(ldr_render_path, exist_ok=True)
     makedirs(depth_path, exist_ok=True)
     makedirs(gts_path, exist_ok=True)
     makedirs(gt_depth_path, exist_ok=True)
     makedirs(masks_path, exist_ok=True)
     
-    render_images = []
+    ldr_render_images = []
     render_depths = []
     gt_list = []
     gt_depths = []
@@ -51,9 +51,17 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
 
     for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
         stage = 'coarse' if no_fine else 'fine'
-        rendering = render(view, gaussians, pipeline, background)
+        if idx % 24 < 6:
+            exposure_time = 0.5
+        elif idx % 24 < 12:
+            exposure_time = 1.0
+        elif idx % 24 < 18:
+            exposure_time = 1.5
+        else:
+            exposure_time = 1.0
+        rendering = render(view, gaussians, pipeline, background, exposure_time)
         render_depths.append(rendering["depth"].cpu())
-        render_images.append(rendering["render"].cpu())
+        ldr_render_images.append(rendering["ldr_render"].cpu())
         if name in ["train", "test", "video"]:
             gt = view.original_image[0:3, :, :]
             gt_list.append(gt)
@@ -66,10 +74,18 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
         test_times = 20
         for i in range(test_times):
             for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
+                if idx % 24 < 6:
+                    exposure_time = 0.5
+                elif idx % 24 < 12:
+                    exposure_time = 1.0
+                elif idx % 24 < 18:
+                    exposure_time = 1.5
+                else:
+                    exposure_time = 1.0
                 if idx == 0 and i == 0:
                     time1 = time()
                 stage = 'coarse' if no_fine else 'fine'
-                rendering = render(view, gaussians, pipeline, background)
+                rendering = render(view, gaussians, pipeline, background, exposure_time)
         time2=time()
         print("FPS:",(len(views)-1)*test_times/(time2-time1))
     
@@ -82,9 +98,9 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
             
     count = 0
     print("writing rendering images.")
-    if len(render_images) != 0:
-        for image in tqdm(render_images):
-            torchvision.utils.save_image(image, os.path.join(render_path, '{0:05d}'.format(count) + ".png"))
+    if len(ldr_render_images) != 0:
+        for image in tqdm(ldr_render_images):
+            torchvision.utils.save_image(image, os.path.join(ldr_render_path, '{0:05d}'.format(count) + ".png"))
             count +=1
     
     count = 0
@@ -111,7 +127,7 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
             cv2.imwrite(os.path.join(gt_depth_path, '{0:05d}'.format(count) + ".png"), image)
             count += 1
             
-    render_array = torch.stack(render_images, dim=0).permute(0, 2, 3, 1)
+    render_array = torch.stack(ldr_render_images, dim=0).permute(0, 2, 3, 1)
     render_array = (render_array*255).clip(0, 255).cpu().numpy().astype(np.uint8) # BxHxWxC
     imageio.mimwrite(os.path.join(model_path, name, "ours_{}".format(iteration), 'ours_video.mp4'), render_array, fps=30, quality=8)
     
@@ -126,7 +142,7 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
 
     if reconstruct:
         print('file name:', name)
-        reconstruct_point_cloud(render_images, mask_list, render_depths, camera_parameters, name, model_path, crop_size)
+        reconstruct_point_cloud(ldr_render_images, mask_list, render_depths, camera_parameters, name, model_path, crop_size)
 
 def render_sets(dataset : ModelParams, hyperparam, iteration : int, pipeline : PipelineParams, skip_train : bool, skip_test : bool, skip_video: bool, reconstruct_train: bool, reconstruct_test: bool, reconstruct_video: bool):
     with torch.no_grad():
@@ -141,7 +157,7 @@ def render_sets(dataset : ModelParams, hyperparam, iteration : int, pipeline : P
         if not skip_test:
             render_set(dataset.model_path, "test", scene.loaded_iter, scene.getTestCameras(), gaussians, pipeline, background, False, reconstruct=reconstruct_test, crop_size=20)
         if not skip_video:
-            render_set(dataset.model_path,"video",scene.loaded_iter, scene.getVideoCameras(),gaussians,pipeline,background, False, render_test=True, reconstruct=reconstruct_video, crop_size=20)
+            render_set(dataset.model_path, "video", scene.loaded_iter, scene.getVideoCameras(), gaussians, pipeline, background, False, render_test=True, reconstruct=reconstruct_video, crop_size=20)
 
 def reconstruct_point_cloud(images, masks, depths, camera_parameters, name, model_path, crop_left_size=0):
     import cv2

@@ -24,6 +24,37 @@ from utils.general_utils import strip_symmetric, build_scaling_rotation
 from scene.regulation import compute_plane_smoothness
 from typing import Tuple
 
+
+class ToneMapper(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.tone_mapper_red = nn.Sequential(
+            nn.Linear(1, 128),
+            nn.ReLU(inplace=True),
+            nn.Linear(128, 1),
+            nn.Sigmoid()
+        )
+        self.tone_mapper_green = nn.Sequential(
+            nn.Linear(1, 128),
+            nn.ReLU(inplace=True),
+            nn.Linear(128, 1),
+            nn.Sigmoid()
+        )
+        self.tone_mapper_blue = nn.Sequential(
+            nn.Linear(1, 128),
+            nn.ReLU(inplace=True),
+            nn.Linear(128, 1),
+            nn.Sigmoid()
+        )
+
+    def forward(self, exposure):
+        red = self.tone_mapper_red(exposure[:,0:1])
+        green = self.tone_mapper_green(exposure[:,1:2])
+        blue = self.tone_mapper_blue(exposure[:,2:3])
+
+        return torch.cat([red, green, blue], dim=-1)
+
+
 class GaussianModel:
 
     def setup_functions(self):
@@ -63,11 +94,13 @@ class GaussianModel:
         self.spatial_lr_scale = 0
         self.setup_functions()
 
-        self._irradiance_mlp = nn.Sequential(
+        self._color_mlp = nn.Sequential(
             nn.Linear(36, 36),
             nn.ReLU(inplace=True),
             nn.Linear(36, 3),
         ).cuda()
+
+        self._tone_mapper = ToneMapper().cuda()
 
     def capture(self):
         return (
@@ -124,22 +157,20 @@ class GaussianModel:
     def get_coef(self):
         return self._coefs, self.args.poly_order_num, self.args.fs_order_num
     
-    # @property
-    # def get_features(self):
+    @property
+    def get_features(self):
     #     # features_dc = self._features_dc
     #     # features_rest = self._features_rest
     #     # return torch.cat((features_dc, features_rest), dim=1)
-    #     return self._features
+        return self._features
     
     @property
-    def get_irradiance(self):
-        log_irradiance = self._irradiance_mlp(self._features)
-        return torch.exp(log_irradiance)
+    def get_color_mlp(self):
+        return self._color_mlp
     
     @property
-    def get_color(self):
-        irradiance = self.get_irradiance
-        return 1 / (1 + torch.exp(-irradiance))
+    def get_tone_mapper(self):
+        return self._tone_mapper
     
     @property
     def get_opacity(self):
@@ -203,7 +234,8 @@ class GaussianModel:
             {'params': [self._scaling], 'lr': training_args.scaling_lr, "name": "scaling"},
             {'params': [self._rotation], 'lr': training_args.rotation_lr, "name": "rotation"},
             {'params': [self._coefs], 'lr': training_args.deformation_lr_init * self.spatial_lr_scale, "name": "coefs"},
-            {'params': self._irradiance_mlp.parameters(), 'lr': training_args.irradiance_mlp_lr, "name": "irradiance_mlp"}
+            {'params': self._color_mlp.parameters(), 'lr': training_args.color_mlp_lr, "name": "color_mlp"},
+            {'params': self._tone_mapper.parameters(), 'lr': training_args.tone_mapper_lr, "name": "tone_mapper"}
         ]
 
         self.optimizer = torch.optim.Adam(l, lr=0.0, eps=1e-15)
@@ -344,14 +376,23 @@ class GaussianModel:
         el = PlyElement.describe(elements, 'vertex')
         PlyData([el]).write(path)
 
-    def save_irradiance(self, path):
+    def save_color_mlp(self, path):
         mkdir_p(os.path.dirname(path))
-        torch.save(self._irradiance_mlp.state_dict(), path)
+        torch.save(self._color_mlp.state_dict(), path)
 
-    def load_irradiance(self, path, map_location="cuda"):
+    def load_color_mlp(self, path, map_location="cuda"):
         state = torch.load(path, map_location=map_location)
-        self._irradiance_mlp.load_state_dict(state)
-        self._irradiance_mlp.to("cuda")
+        self._color_mlp.load_state_dict(state)
+        self._color_mlp.to("cuda")
+
+    def save_tone_mapper(self, path):
+        mkdir_p(os.path.dirname(path))
+        torch.save(self._tone_mapper.state_dict(), path)
+
+    def load_tone_mapper(self, path, map_location="cuda"):
+        state = torch.load(path, map_location=map_location)
+        self._tone_mapper.load_state_dict(state)
+        self._tone_mapper.to("cuda")
         
     def reset_opacity(self):
         opacities_new = inverse_sigmoid(torch.min(self.get_opacity, torch.ones_like(self.get_opacity)*0.01))
