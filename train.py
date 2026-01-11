@@ -83,8 +83,9 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         if (iteration - 1) == debug_from:
             pipe.debug = True
             
-        ldr_images = []
-        hdr_images = []
+        images_LDR_from3d = []
+        images_LDR_from2d = []
+        images_HDR = []
         depths = []
         gt_images = []
         gt_depths = []
@@ -105,14 +106,15 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
                 exposure_time = 1.0
 
             render_pkg = render(viewpoint_cam, gaussians, pipe, background, exposure_time)
-            image_ldr, image_hdr, depth, viewspace_point_tensor, visibility_filter, radii = \
-                render_pkg["render_ldr"], render_pkg["render_hdr"], render_pkg["depth"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
+            image_LDR_from3d, image_LDR_from2d, image_HDR, depth, viewspace_point_tensor, visibility_filter, radii = \
+                render_pkg["image_LDR_from3d"], render_pkg["image_LDR_from2d"], render_pkg["image_HDR"], render_pkg["depth"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
             gt_image = viewpoint_cam.original_image.cuda().float()
             gt_depth = viewpoint_cam.original_depth.cuda().float()
             mask = viewpoint_cam.mask.cuda()
             
-            ldr_images.append(image_ldr.unsqueeze(0))
-            hdr_images.append(image_hdr.unsqueeze(0))
+            images_LDR_from3d.append(image_LDR_from3d.unsqueeze(0))
+            images_LDR_from2d.append(image_LDR_from2d.unsqueeze(0))
+            images_HDR.append(image_HDR.unsqueeze(0))
             depths.append(depth.unsqueeze(0))
             gt_images.append(gt_image.unsqueeze(0))
             gt_depths.append(gt_depth.unsqueeze(0))
@@ -123,15 +125,17 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
 
         radii = torch.cat(radii_list,0).max(dim=0).values
         visibility_filter = torch.cat(visibility_filter_list).any(dim=0)
-        ldr_image_tensor = torch.cat(ldr_images, 0)
-        hdr_image_tensor = torch.cat(hdr_images, 0)
+        images_LDR_from3d_tensor = torch.cat(images_LDR_from3d, 0)
+        images_LDR_from2d_tensor = torch.cat(images_LDR_from2d, 0)
+        images_HDR_tensor = torch.cat(images_HDR, 0)
         depth_tensor = torch.cat(depths, 0)
         gt_image_tensor = torch.cat(gt_images,0)
         gt_depth_tensor = torch.cat(gt_depths, 0)
         mask_tensor = torch.cat(masks, 0)
         
-        Ll1 = l1_loss(ldr_image_tensor, gt_image_tensor, mask_tensor)
-        
+        Ll1_ldr_from3d = l1_loss(images_LDR_from3d_tensor, gt_image_tensor, mask_tensor)
+        Ll1_ldr_from2d = l1_loss(images_LDR_from2d_tensor, gt_image_tensor, mask_tensor)
+
         if (gt_depth_tensor!=0).sum() < 10:
             depth_loss = torch.tensor(0.).cuda()
         else:
@@ -141,9 +145,9 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
             depth_loss = l1_loss(depth_tensor, gt_depth_tensor, mask_tensor)
         
       
-        psnr_ = psnr(ldr_image_tensor, gt_image_tensor, mask_tensor).mean().double()        
-        loss = Ll1 + depth_loss 
-        
+        psnr_ = psnr(images_LDR_from3d_tensor, gt_image_tensor, mask_tensor).mean().double()        
+        loss = Ll1_ldr_from3d + Ll1_ldr_from2d + depth_loss 
+
         loss.backward()
         viewspace_point_tensor_grad = torch.zeros_like(viewspace_point_tensor)
         for idx in range(0, len(viewspace_point_tensor_list)):
@@ -166,7 +170,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
             # Log and save
             timer.pause()
             # training_report(tb_writer, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, [pipe, background])
-            training_report(tb_writer, iteration, Ll1, loss, loss, iter_time, testing_iterations, scene, render, [pipe, background])
+            # training_report(tb_writer, iteration, Ll1, loss, loss, iter_time, testing_iterations, scene, render, [pipe, background])
             if (iteration in saving_iterations):
                 print("\n[ITER {}] Saving Gaussians".format(iteration))
                 scene.save(iteration, 'fine')

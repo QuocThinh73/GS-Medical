@@ -28,22 +28,29 @@ import cv2
 
 
 to8b = lambda x : (255*np.clip(x.cpu().numpy(),0,1)).astype(np.uint8)
+tonemap_mu = lambda x : (torch.log(torch.clip(x,0,1) * 5000 + 1 ) / np.log(5000 + 1))
 
 def render_set(model_path, name, iteration, views, gaussians, pipeline, background,\
     no_fine, render_test=False, reconstruct=False, crop_size=0):
-    ldr_render_path = os.path.join(model_path, name, "ours_{}".format(iteration), "ldr_renders")
+    ldr_from3d_render_path = os.path.join(model_path, name, "ours_{}".format(iteration), "ldr_from3d_renders")
+    ldr_from2d_render_path = os.path.join(model_path, name, "ours_{}".format(iteration), "ldr_from2d_renders")
+    hdr_render_path = os.path.join(model_path, name, "ours_{}".format(iteration), "hdr_renders")
     depth_path = os.path.join(model_path, name, "ours_{}".format(iteration), "depth")
     gts_path = os.path.join(model_path, name, "ours_{}".format(iteration), "gt")
     gt_depth_path = os.path.join(model_path, name, "ours_{}".format(iteration), "gt_depth")
     masks_path = os.path.join(model_path, name, "ours_{}".format(iteration), "masks")
 
-    makedirs(ldr_render_path, exist_ok=True)
+    makedirs(ldr_from3d_render_path, exist_ok=True)
+    makedirs(ldr_from2d_render_path, exist_ok=True)
+    makedirs(hdr_render_path, exist_ok=True)
     makedirs(depth_path, exist_ok=True)
     makedirs(gts_path, exist_ok=True)
     makedirs(gt_depth_path, exist_ok=True)
     makedirs(masks_path, exist_ok=True)
     
-    ldr_render_images = []
+    ldr_from3d_render_images = []
+    ldr_from2d_render_images = []
+    hdr_render_images = []
     render_depths = []
     gt_list = []
     gt_depths = []
@@ -61,7 +68,11 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
             exposure_time = 1.0
         rendering = render(view, gaussians, pipeline, background, exposure_time)
         render_depths.append(rendering["depth"].cpu())
-        ldr_render_images.append(rendering["ldr_render"].cpu())
+        ldr_from3d_render_images.append(rendering["image_LDR_from3d"].cpu())
+        ldr_from2d_render_images.append(rendering["image_LDR_from2d"].cpu())
+        hdr_rendered = rendering["image_HDR"].cpu()
+        hdr_render_images.append(tonemap_mu(hdr_rendered / hdr_rendered.max()))
+
         if name in ["train", "test", "video"]:
             gt = view.original_image[0:3, :, :]
             gt_list.append(gt)
@@ -97,12 +108,26 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
             count+=1
             
     count = 0
-    print("writing rendering images.")
-    if len(ldr_render_images) != 0:
-        for image in tqdm(ldr_render_images):
-            torchvision.utils.save_image(image, os.path.join(ldr_render_path, '{0:05d}'.format(count) + ".png"))
+    print("writing ldr from3d rendering images.")
+    if len(ldr_from3d_render_images) != 0:
+        for image in tqdm(ldr_from3d_render_images):
+            torchvision.utils.save_image(image, os.path.join(ldr_from3d_render_path, '{0:05d}'.format(count) + ".png"))
+            count +=1
+
+    count = 0
+    print("writing ldr from2d rendering images.")
+    if len(ldr_from2d_render_images) != 0:
+        for image in tqdm(ldr_from2d_render_images):
+            torchvision.utils.save_image(image, os.path.join(ldr_from2d_render_path, '{0:05d}'.format(count) + ".png"))
             count +=1
     
+    count = 0
+    print("writing hdr rendering images.")
+    if len(hdr_render_images) != 0:
+        for image in tqdm(hdr_render_images):
+            torchvision.utils.save_image(image, os.path.join(hdr_render_path, '{0:05d}'.format(count) + ".png"))
+            count +=1
+
     count = 0
     print("writing mask images.")
     if len(mask_list) != 0:
@@ -127,9 +152,17 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
             cv2.imwrite(os.path.join(gt_depth_path, '{0:05d}'.format(count) + ".png"), image)
             count += 1
             
-    render_array = torch.stack(ldr_render_images, dim=0).permute(0, 2, 3, 1)
-    render_array = (render_array*255).clip(0, 255).cpu().numpy().astype(np.uint8) # BxHxWxC
-    imageio.mimwrite(os.path.join(model_path, name, "ours_{}".format(iteration), 'ours_video.mp4'), render_array, fps=30, quality=8)
+    ldr_from3d_render_array = torch.stack(ldr_from3d_render_images, dim=0).permute(0, 2, 3, 1)
+    ldr_from3d_render_array = (ldr_from3d_render_array*255).clip(0, 255).cpu().numpy().astype(np.uint8) # BxHxWxC
+    imageio.mimwrite(os.path.join(model_path, name, "ours_{}".format(iteration), 'ours_ldr_from3d_video.mp4'), ldr_from3d_render_array, fps=30, quality=8)
+    
+    ldr_from2d_render_array = torch.stack(ldr_from2d_render_images, dim=0).permute(0, 2, 3, 1)
+    ldr_from2d_render_array = (ldr_from2d_render_array*255).clip(0, 255).cpu().numpy().astype(np.uint8) # BxHxWxC
+    imageio.mimwrite(os.path.join(model_path, name, "ours_{}".format(iteration), 'ours_ldr_from2d_video.mp4'), ldr_from2d_render_array, fps=30, quality=8)
+
+    hdr_render_array = torch.stack(ldr_from2d_render_images, dim=0).permute(0, 2, 3, 1)
+    hdr_render_array = (hdr_render_array*255).clip(0, 255).cpu().numpy().astype(np.uint8) # BxHxWxC
+    imageio.mimwrite(os.path.join(model_path, name, "ours_{}".format(iteration), 'ours_hdr_video.mp4'), hdr_render_array, fps=30, quality=8)
     
     gt_array = torch.stack(gt_list, dim=0).permute(0, 2, 3, 1)
     gt_array = (gt_array*255).clip(0, 255).cpu().numpy().astype(np.uint8)
@@ -142,7 +175,7 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
 
     if reconstruct:
         print('file name:', name)
-        reconstruct_point_cloud(ldr_render_images, mask_list, render_depths, camera_parameters, name, model_path, crop_size)
+        reconstruct_point_cloud(ldr_from3d_render_images, mask_list, render_depths, camera_parameters, name, model_path, crop_size)
 
 def render_sets(dataset : ModelParams, hyperparam, iteration : int, pipeline : PipelineParams, skip_train : bool, skip_test : bool, skip_video: bool, reconstruct_train: bool, reconstruct_test: bool, reconstruct_video: bool):
     with torch.no_grad():

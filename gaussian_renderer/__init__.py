@@ -124,7 +124,7 @@ def render_flow(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Ten
     gaussian_ldr_color = pc.get_tone_mapper(gaussian_exposure)
 
     # Rasterize visible Gaussians to image, obtain their radii (on screen). 
-    rendered_image_ldr, radii, depth = rasterizer(
+    image_LDR_from3d, radii, depth = rasterizer(
         means3D = means3D_final,
         means2D = means2D,
         shs = None,
@@ -134,7 +134,7 @@ def render_flow(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Ten
         rotations = rotations_final,
         cov3D_precomp = cov3D_precomp)
     
-    rendered_image_hdr, _, _ = rasterizer(
+    image_HDR, _, _ = rasterizer(
         means3D = means3D_final,
         means2D = means2D,
         shs = None,
@@ -143,11 +143,16 @@ def render_flow(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Ten
         scales = scales_final,
         rotations = rotations_final,
         cov3D_precomp = cov3D_precomp)
+    
+    flatten_image_HDR = image_HDR.clone().reshape([3, -1]).transpose(0, 1)
+    flatten_image_LDR_from2d = pc.get_tone_mapper(torch.log(flatten_image_HDR * exposure_time + 1e-5))
+    image_LDR_from2d = flatten_image_LDR_from2d.transpose(0, 1).reshape(image_HDR.shape)
 
     # Those Gaussians that were frustum culled or had a radius of 0 were not visible.
     # They will be excluded from value updates used in the splitting criteria.
-    return {"ldr_render": rendered_image_ldr,
-            "hdr_render": rendered_image_hdr,
+    return {"image_LDR_from3d": image_LDR_from3d,
+            "image_LDR_from2d": image_LDR_from2d,
+            "image_HDR": image_HDR,
             "depth": depth,
             "viewspace_points": screenspace_points,
             "visibility_filter" : radii > 0,
