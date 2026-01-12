@@ -285,7 +285,7 @@ class GaussianModel:
 
 
     def load_model(self, path):
-        print("loading model from exists{}".format(path))
+        print("loading model from exists {}".format(path))
         
         self._deformation_table = torch.gt(torch.ones((self.get_xyz.shape[0]),device="cuda"),0)
         if os.path.exists(os.path.join(path, "deformation_table.pth")):
