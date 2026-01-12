@@ -4,8 +4,8 @@ set -e
 #########################
 # ARGUMENTS
 #########################
-EXP_GROUP=$1    # ví dụ: exp1, exp2, exp3
-SCENE=$2        # ví dụ: pulling hoặc cutting
+EXP_GROUP=$1    # exp1, exp2, exp3
+SCENE=$2        # pulling, cutting
 
 if [ -z "$EXP_GROUP" ] || [ -z "$SCENE" ]; then
     echo "Usage: ./run.sh <exp_group> <scene>"
