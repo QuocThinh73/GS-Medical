@@ -12,7 +12,7 @@ import random
 import os 
 import torch
 from random import randint
-from utils.loss_utils import l1_loss
+from utils.loss_utils import l1_loss, unit_expos_loss, TV_loss
 from gaussian_renderer import render_flow as render
 
 import time
@@ -136,6 +136,9 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         Ll1_ldr_from3d = l1_loss(images_LDR_from3d_tensor, gt_image_tensor, mask_tensor)
         Ll1_ldr_from2d = l1_loss(images_LDR_from2d_tensor, gt_image_tensor, mask_tensor)
 
+        loss_3d = Ll1_ldr_from3d
+        loss_2d = Ll1_ldr_from2d
+
         if (gt_depth_tensor!=0).sum() < 10:
             depth_loss = torch.tensor(0.).cuda()
         else:
@@ -143,12 +146,16 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
             gt_depth_tensor[gt_depth_tensor!=0] = 1 / gt_depth_tensor[gt_depth_tensor!=0]
      
             depth_loss = l1_loss(depth_tensor, gt_depth_tensor, mask_tensor)
+
+        img_3d_tvloss = TV_loss(images_LDR_from3d_tensor)
+        img_2d_tvloss = TV_loss(images_LDR_from2d_tensor)
+        depth_tvloss = TV_loss(depth_tensor)
         
-      
-        psnr_ = psnr(images_LDR_from3d_tensor, gt_image_tensor, mask_tensor).mean().double()        
-        loss = Ll1_ldr_from3d + Ll1_ldr_from2d + depth_loss 
+        loss = loss_3d + loss_2d + depth_loss + 0.01 * (img_3d_tvloss + img_2d_tvloss + depth_tvloss) + 0.5 * unit_expos_loss(gaussians.get_tone_mapper, 0.6)
 
         loss.backward()
+
+        psnr_ = psnr(images_LDR_from3d_tensor, gt_image_tensor, mask_tensor).mean().double()        
         viewspace_point_tensor_grad = torch.zeros_like(viewspace_point_tensor)
         for idx in range(0, len(viewspace_point_tensor_list)):
             viewspace_point_tensor_grad = viewspace_point_tensor_grad + viewspace_point_tensor_list[idx].grad

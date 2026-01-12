@@ -160,7 +160,7 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     ldr_from2d_render_array = (ldr_from2d_render_array*255).clip(0, 255).cpu().numpy().astype(np.uint8) # BxHxWxC
     imageio.mimwrite(os.path.join(model_path, name, "ours_{}".format(iteration), 'ours_ldr_from2d_video.mp4'), ldr_from2d_render_array, fps=30, quality=8)
 
-    hdr_render_array = torch.stack(ldr_from2d_render_images, dim=0).permute(0, 2, 3, 1)
+    hdr_render_array = torch.stack(hdr_render_images, dim=0).permute(0, 2, 3, 1)
     hdr_render_array = (hdr_render_array*255).clip(0, 255).cpu().numpy().astype(np.uint8) # BxHxWxC
     imageio.mimwrite(os.path.join(model_path, name, "ours_{}".format(iteration), 'ours_hdr_video.mp4'), hdr_render_array, fps=30, quality=8)
     
