@@ -48,6 +48,13 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         (model_params, first_iter) = torch.load(checkpoint)
         gaussians.restore(model_params, opt)
 
+    exposure_time_params = [camera.exposure_time for camera in scene.getTrainCameras()]
+    gaussians.optimizer.add_param_group({
+        "params": exposure_time_params,
+        "lr": opt.exposure_time_lr,
+        "name": "exposure_time"
+    })
+
     bg_color = [1, 1, 1] if dataset.white_background else [0, 0, 0]
     background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
 
@@ -96,16 +103,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         viewspace_point_tensor_list = []
         
         for viewpoint_cam in viewpoint_cams:
-            if idx % 24 < 6:
-                exposure_time = 0.5
-            elif idx % 24 < 12:
-                exposure_time = 1.0
-            elif idx % 24 < 18:
-                exposure_time = 1.5
-            else:
-                exposure_time = 1.0
-
-            render_pkg = render(viewpoint_cam, gaussians, pipe, background, exposure_time)
+            render_pkg = render(viewpoint_cam, gaussians, pipe, background, viewpoint_cam.exposure_time)
             image_LDR_from3d, image_LDR_from2d, image_HDR, depth, viewspace_point_tensor, visibility_filter, radii = \
                 render_pkg["image_LDR_from3d"], render_pkg["image_LDR_from2d"], render_pkg["image_HDR"], render_pkg["depth"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
             gt_image = viewpoint_cam.original_image.cuda().float()

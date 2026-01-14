@@ -129,6 +129,8 @@ class OptimizationParams(ParamGroup):
         self.color_mlp_lr = 0.0005
         self.tone_mapper_lr = 0.0005
         
+        self.exposure_time_lr = 0.0005
+
         super().__init__(parser, "Optimization Parameters")
 
 def get_combined_args(parser : ArgumentParser):

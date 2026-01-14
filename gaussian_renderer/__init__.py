@@ -118,7 +118,6 @@ def render_flow(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Ten
     features = pc.get_features
     gaussian_hdr_color = torch.exp(pc.get_color_mlp(features))
 
-    exposure_time = torch.tensor(float(exposure_time)).cuda()
     gaussian_exposure = torch.log(gaussian_hdr_color) + torch.log(exposure_time)
 
     gaussian_ldr_color = pc.get_tone_mapper(gaussian_exposure)

@@ -58,15 +58,7 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
 
     for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
         stage = 'coarse' if no_fine else 'fine'
-        if idx % 24 < 6:
-            exposure_time = 0.5
-        elif idx % 24 < 12:
-            exposure_time = 1.0
-        elif idx % 24 < 18:
-            exposure_time = 1.5
-        else:
-            exposure_time = 1.0
-        rendering = render(view, gaussians, pipeline, background, exposure_time)
+        rendering = render(view, gaussians, pipeline, background, view.exposure_time)
         render_depths.append(rendering["depth"].cpu())
         ldr_from3d_render_images.append(rendering["image_LDR_from3d"].cpu())
         ldr_from2d_render_images.append(rendering["image_LDR_from2d"].cpu())
@@ -85,18 +77,10 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
         test_times = 20
         for i in range(test_times):
             for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
-                if idx % 24 < 6:
-                    exposure_time = 0.5
-                elif idx % 24 < 12:
-                    exposure_time = 1.0
-                elif idx % 24 < 18:
-                    exposure_time = 1.5
-                else:
-                    exposure_time = 1.0
                 if idx == 0 and i == 0:
                     time1 = time()
                 stage = 'coarse' if no_fine else 'fine'
-                rendering = render(view, gaussians, pipeline, background, exposure_time)
+                rendering = render(view, gaussians, pipeline, background, view.exposure_time)
         time2=time()
         print("FPS:",(len(views)-1)*test_times/(time2-time1))
     
