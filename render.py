@@ -39,6 +39,8 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     gts_path = os.path.join(model_path, name, "ours_{}".format(iteration), "gt")
     gt_depth_path = os.path.join(model_path, name, "ours_{}".format(iteration), "gt_depth")
     masks_path = os.path.join(model_path, name, "ours_{}".format(iteration), "masks")
+    consistent_ldr_images_from3d_path = os.path.join(model_path, name, "ours_{}".format(iteration), "consistent_ldr_from3d_renders")
+    consistent_ldr_images_from2d_path = os.path.join(model_path, name, "ours_{}".format(iteration), "consistent_ldr_from2d_renders")
 
     makedirs(ldr_from3d_render_path, exist_ok=True)
     makedirs(ldr_from2d_render_path, exist_ok=True)
@@ -47,10 +49,14 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     makedirs(gts_path, exist_ok=True)
     makedirs(gt_depth_path, exist_ok=True)
     makedirs(masks_path, exist_ok=True)
+    makedirs(consistent_ldr_images_from3d_path, exist_ok=True)
+    makedirs(consistent_ldr_images_from2d_path, exist_ok=True)
     
     ldr_from3d_render_images = []
     ldr_from2d_render_images = []
     hdr_render_images = []
+    consistent_ldr_images_from3d = []
+    consistent_ldr_images_from2d = []
     render_depths = []
     gt_list = []
     gt_depths = []
@@ -64,6 +70,13 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
         ldr_from2d_render_images.append(rendering["image_LDR_from2d"].cpu())
         hdr_rendered = rendering["image_HDR"].cpu()
         hdr_render_images.append(tonemap_mu(hdr_rendered / hdr_rendered.max()))
+
+        exposure_time = torch.tensor(1.0, device="cuda", dtype=torch.float)
+        temp_rendering = render(view, gaussians, pipeline, background, exposure_time)
+        consistent_ldr_image_from3d = temp_rendering["image_LDR_from3d"].cpu()
+        consistent_ldr_image_from2d = temp_rendering["image_LDR_from2d"].cpu()
+        consistent_ldr_images_from3d.append(consistent_ldr_image_from3d)
+        consistent_ldr_images_from2d.append(consistent_ldr_image_from2d)
 
         if name in ["train", "test", "video"]:
             gt = view.original_image[0:3, :, :]
@@ -135,6 +148,20 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
             image = image.cpu().squeeze().numpy().astype(np.uint8)
             cv2.imwrite(os.path.join(gt_depth_path, '{0:05d}'.format(count) + ".png"), image)
             count += 1
+
+    count = 0
+    print("writing consistent ldr images from3d.")
+    if len(consistent_ldr_images_from3d) != 0:
+        for image in tqdm(consistent_ldr_images_from3d):
+            torchvision.utils.save_image(image, os.path.join(consistent_ldr_images_from3d_path, '{0:05d}'.format(count) + ".png"))
+            count += 1
+
+    count = 0
+    print("writing consistent ldr images from2d.")
+    if len(consistent_ldr_images_from2d) != 0:
+        for image in tqdm(consistent_ldr_images_from2d):
+            torchvision.utils.save_image(image, os.path.join(consistent_ldr_images_from2d_path, '{0:05d}'.format(count) + ".png"))
+            count += 1
             
     ldr_from3d_render_array = torch.stack(ldr_from3d_render_images, dim=0).permute(0, 2, 3, 1)
     ldr_from3d_render_array = (ldr_from3d_render_array*255).clip(0, 255).cpu().numpy().astype(np.uint8) # BxHxWxC
@@ -143,6 +170,14 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     ldr_from2d_render_array = torch.stack(ldr_from2d_render_images, dim=0).permute(0, 2, 3, 1)
     ldr_from2d_render_array = (ldr_from2d_render_array*255).clip(0, 255).cpu().numpy().astype(np.uint8) # BxHxWxC
     imageio.mimwrite(os.path.join(model_path, name, "ours_{}".format(iteration), 'ours_ldr_from2d_video.mp4'), ldr_from2d_render_array, fps=30, quality=8)
+
+    consistent_ldr_images_from3d_render_array = torch.stack(consistent_ldr_images_from3d, dim=0).permute(0, 2, 3, 1)
+    consistent_ldr_images_from3d_render_array = (consistent_ldr_images_from3d_render_array*255).clip(0, 255).cpu().numpy().astype(np.uint8) # BxHxWxC
+    imageio.mimwrite(os.path.join(model_path, name, "ours_{}".format(iteration), 'ours_consistent_ldr_from2d_video.mp4'), consistent_ldr_images_from3d_render_array, fps=30, quality=8)
+
+    consistent_ldr_images_from2d_render_array = torch.stack(consistent_ldr_images_from2d, dim=0).permute(0, 2, 3, 1)
+    consistent_ldr_images_from2d_render_array = (consistent_ldr_images_from2d_render_array*255).clip(0, 255).cpu().numpy().astype(np.uint8) # BxHxWxC
+    imageio.mimwrite(os.path.join(model_path, name, "ours_{}".format(iteration), 'ours_consistent_ldr_from3d_video.mp4'), consistent_ldr_images_from2d_render_array, fps=30, quality=8)
 
     hdr_render_array = torch.stack(hdr_render_images, dim=0).permute(0, 2, 3, 1)
     hdr_render_array = (hdr_render_array*255).clip(0, 255).cpu().numpy().astype(np.uint8) # BxHxWxC

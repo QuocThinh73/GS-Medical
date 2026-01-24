@@ -74,6 +74,15 @@ class Camera(nn.Module):
         self.full_proj_transform = (self.world_view_transform.unsqueeze(0).bmm(self.projection_matrix.unsqueeze(0))).squeeze(0)
         self.camera_center = self.world_view_transform.inverse()[3, :3]
 
+        # if int(self.image_name) % 24 < 6:
+        #     self.exposure_time = nn.Parameter(torch.tensor(0.5, device=self.data_device, dtype=torch.float))
+        # elif int(self.image_name) % 24 < 12:
+        #     self.exposure_time = nn.Parameter(torch.tensor(1.0, device=self.data_device, dtype=torch.float))
+        # elif int(self.image_name) % 24 < 18:
+        #     self.exposure_time = nn.Parameter(torch.tensor(1.5, device=self.data_device, dtype=torch.float))
+        # elif int(self.image_name) % 24 < 24:
+        #     self.exposure_time = nn.Parameter(torch.tensor(1.0, device=self.data_device, dtype=torch.float))
+
         self.exposure_time = nn.Parameter(torch.tensor(1.0, device=self.data_device, dtype=torch.float))
 
 class MiniCam:

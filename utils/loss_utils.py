@@ -95,3 +95,22 @@ def unit_expos_loss(tone_mapper, gt):
     rgb_l = tone_mapper(ln_x)
     
     return torch.mean((rgb_l - gt) ** 2)
+
+def temporal_luminance_loss(frame1, frame2, mask=None):
+    loss = torch.abs(frame1 - frame2)
+    if mask.ndim == 4:
+        mask = mask.repeat(1, frame1.shape[1], 1, 1)
+    elif mask.ndim == 3:
+        mask = mask.repeat(frame1.shape[1], 1, 1)
+    else:
+        raise ValueError('the dimension of mask should be either 3 or 4')
+    
+    try:
+        loss = loss[mask!=0]
+    except:
+        print(loss.shape)
+        print(mask.shape)
+        print(loss.dtype)
+        print(mask.dtype)
+    
+    return loss.mean()
