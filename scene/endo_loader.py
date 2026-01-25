@@ -179,6 +179,11 @@ class EndoNeRF_Dataset(object):
         assert len(self.depth_paths) == poses.shape[0], "the number of depth images should equal to number of poses"
         assert len(self.masks_paths) == poses.shape[0], "the number of masks should equal to the number of poses"
         
+        self.brightness_map = {}
+        brightness_path = os.path.join(self.root_dir, "brightness.json")
+        with open(brightness_path, "r", encoding="utf-8") as f:
+            self.brightness_map = json.load(f)
+
     def format_infos(self, split):
         cameras = []
         
@@ -215,7 +220,11 @@ class EndoNeRF_Dataset(object):
             # fov
             FovX = focal2fov(self.focal[0], self.img_wh[0])
             FovY = focal2fov(self.focal[1], self.img_wh[1])
-            cameras.append(Camera(colmap_id=idx, R=R, T=T, FoVx=FovX, FoVy=FovY,image=image, depth=depth, mask=mask, gt_alpha_mask=None,
+            # brightness
+            img_name = os.path.basename(self.image_paths[idx])
+            brightness = self.brightness_map.get(img_name, None)
+
+            cameras.append(Camera(colmap_id=idx, R=R, T=T, FoVx=FovX, FoVy=FovY,image=image, depth=depth, mask=mask, gt_alpha_mask=None, brightness=brightness,
                           image_name=f"{idx}", uid=idx, data_device=torch.device("cuda"), time=time,
                           Znear=None, Zfar=None, K=self.K, h=self.img_wh[1], w=self.img_wh[0]))
         return cameras
