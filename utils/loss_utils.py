@@ -15,7 +15,7 @@ from torch.autograd import Variable
 from math import exp
 
 
-def TV_loss(x, mask):
+def TV_loss(x, mask=None):
     B, C, H, W = x.shape
     tv_h = torch.abs(x[:,:,1:,:] - x[:,:,:-1,:]).sum()
     tv_w = torch.abs(x[:,:,:,1:] - x[:,:,:,:-1]).sum()
@@ -90,3 +90,27 @@ def _ssim(img1, img2, window, window_size, channel, size_average=True):
     else:
         return ssim_map.mean(1).mean(1).mean(1)
 
+def unit_expos_loss(tone_mapper, gt):
+    ln_x = torch.zeros([1,3]).cuda()
+    rgb_l = tone_mapper(ln_x)
+    
+    return torch.mean((rgb_l - gt) ** 2)
+
+def temporal_luminance_loss(frame1, frame2, mask=None):
+    loss = torch.abs(frame1 - frame2)
+    if mask.ndim == 4:
+        mask = mask.repeat(1, frame1.shape[1], 1, 1)
+    elif mask.ndim == 3:
+        mask = mask.repeat(frame1.shape[1], 1, 1)
+    else:
+        raise ValueError('the dimension of mask should be either 3 or 4')
+    
+    try:
+        loss = loss[mask!=0]
+    except:
+        print(loss.shape)
+        print(mask.shape)
+        print(loss.dtype)
+        print(mask.dtype)
+    
+    return loss.mean()

@@ -15,7 +15,7 @@ from diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianR
 from scene.flexible_deform_model import GaussianModel
 from utils.sh_utils import eval_sh
 
-def render_flow(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, override_color = None):
+def render_flow(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, exposure_time, scaling_modifier = 1.0):
     """
     Render the scene. 
     
@@ -43,7 +43,7 @@ def render_flow(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Ten
         scale_modifier=scaling_modifier,
         viewmatrix=viewpoint_camera.world_view_transform.cuda(),
         projmatrix=viewpoint_camera.full_proj_transform.cuda(),
-        sh_degree=0,
+        sh_degree=1,
         campos=viewpoint_camera.camera_center.cuda(),
         prefiltered=False,
         debug=pipe.debug
@@ -97,7 +97,7 @@ def render_flow(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Ten
 
     scales_final = pc.scaling_activation(scales_final)
     rotations_final = pc.rotation_activation(rotations_final)
-    opacity = pc.opacity_activation(opacity)
+    opacity_final = pc.opacity_activation(opacity_final)
 
     # If precomputed colors are provided, use them. Otherwise, if it is desired to precompute colors
     # from SHs in Python, do it. If not, then SH -> RGB conversion will be done by rasterizer.
@@ -115,21 +115,43 @@ def render_flow(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Ten
     # else:
     #     colors_precomp = override_color
 
-    colors_precomp = pc.get_color
+    features = pc.get_features
+    gaussian_hdr_color = torch.exp(pc.get_color_mlp(features))
+
+    gaussian_exposure = torch.log(gaussian_hdr_color) + torch.log(exposure_time)
+
+    gaussian_ldr_color = pc.get_tone_mapper(gaussian_exposure)
+
     # Rasterize visible Gaussians to image, obtain their radii (on screen). 
-    rendered_image, radii, depth = rasterizer(
+    image_LDR_from3d, radii, depth = rasterizer(
         means3D = means3D_final,
         means2D = means2D,
         shs = None,
-        colors_precomp = colors_precomp,
-        opacities = opacity,
+        colors_precomp = gaussian_ldr_color,
+        opacities = opacity_final,
         scales = scales_final,
         rotations = rotations_final,
         cov3D_precomp = cov3D_precomp)
+    
+    image_HDR, _, _ = rasterizer(
+        means3D = means3D_final,
+        means2D = means2D,
+        shs = None,
+        colors_precomp = gaussian_hdr_color,
+        opacities = opacity_final,
+        scales = scales_final,
+        rotations = rotations_final,
+        cov3D_precomp = cov3D_precomp)
+    
+    flatten_image_HDR = image_HDR.clone().reshape([3, -1]).transpose(0, 1)
+    flatten_image_LDR_from2d = pc.get_tone_mapper(torch.log(flatten_image_HDR * exposure_time + 1e-5))
+    image_LDR_from2d = flatten_image_LDR_from2d.transpose(0, 1).reshape(image_HDR.shape)
 
     # Those Gaussians that were frustum culled or had a radius of 0 were not visible.
     # They will be excluded from value updates used in the splitting criteria.
-    return {"render": rendered_image,
+    return {"image_LDR_from3d": image_LDR_from3d,
+            "image_LDR_from2d": image_LDR_from2d,
+            "image_HDR": image_HDR,
             "depth": depth,
             "viewspace_points": screenspace_points,
             "visibility_filter" : radii > 0,

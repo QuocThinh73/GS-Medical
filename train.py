@@ -12,7 +12,7 @@ import random
 import os 
 import torch
 from random import randint
-from utils.loss_utils import l1_loss
+from utils.loss_utils import l1_loss, unit_expos_loss, TV_loss, temporal_luminance_loss
 from gaussian_renderer import render_flow as render
 
 import time
@@ -47,6 +47,13 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
     if checkpoint:
         (model_params, first_iter) = torch.load(checkpoint)
         gaussians.restore(model_params, opt)
+
+    exposure_time_params = [camera.exposure_time for camera in scene.getTrainCameras()]
+    gaussians.optimizer.add_param_group({
+        "params": exposure_time_params,
+        "lr": opt.exposure_time_lr,
+        "name": "exposure_time"
+    })
 
     bg_color = [1, 1, 1] if dataset.white_background else [0, 0, 0]
     background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
@@ -83,25 +90,33 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         if (iteration - 1) == debug_from:
             pipe.debug = True
             
-        images = []
+        images_LDR_from3d = []
+        images_LDR_from2d = []
+        images_HDR = []
         depths = []
         gt_images = []
         gt_depths = []
         masks = []
+        previous_images_HDR = []
+        previous_masks = []
+        next_images_HDR = []
+        next_masks = []
         
         radii_list = []
         visibility_filter_list = []
         viewspace_point_tensor_list = []
         
         for viewpoint_cam in viewpoint_cams:
-            render_pkg = render(viewpoint_cam, gaussians, pipe, background)
-            image, depth, viewspace_point_tensor, visibility_filter, radii = \
-                render_pkg["render"], render_pkg["depth"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
+            render_pkg = render(viewpoint_cam, gaussians, pipe, background, viewpoint_cam.exposure_time)
+            image_LDR_from3d, image_LDR_from2d, image_HDR, depth, viewspace_point_tensor, visibility_filter, radii = \
+                render_pkg["image_LDR_from3d"], render_pkg["image_LDR_from2d"], render_pkg["image_HDR"], render_pkg["depth"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
             gt_image = viewpoint_cam.original_image.cuda().float()
             gt_depth = viewpoint_cam.original_depth.cuda().float()
             mask = viewpoint_cam.mask.cuda()
             
-            images.append(image.unsqueeze(0))
+            images_LDR_from3d.append(image_LDR_from3d.unsqueeze(0))
+            images_LDR_from2d.append(image_LDR_from2d.unsqueeze(0))
+            images_HDR.append(image_HDR.unsqueeze(0))
             depths.append(depth.unsqueeze(0))
             gt_images.append(gt_image.unsqueeze(0))
             gt_depths.append(gt_depth.unsqueeze(0))
@@ -110,16 +125,41 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
             visibility_filter_list.append(visibility_filter.unsqueeze(0))
             viewspace_point_tensor_list.append(viewspace_point_tensor)
 
+            if iteration > 3000:
+                previous_viewpoint_cam = viewpoint_stack[idx-1] if idx > 0 else viewpoint_stack[idx]
+                previous_render_pkg = render(previous_viewpoint_cam, gaussians, pipe, background, previous_viewpoint_cam.exposure_time)
+                previous_image_HDR = previous_render_pkg["image_HDR"]
+                previous_images_HDR.append(previous_image_HDR.unsqueeze(0))
+                previous_mask = previous_viewpoint_cam.mask.cuda()
+                previous_masks.append(previous_mask.unsqueeze(0))
+                next_viewpoint_cam = viewpoint_stack[idx+1] if idx < len(viewpoint_stack)-1 else viewpoint_stack[idx]
+                next_render_pkg = render(previous_viewpoint_cam, gaussians, pipe, background, previous_viewpoint_cam.exposure_time)
+                next_image_HDR = next_render_pkg["image_HDR"]
+                next_images_HDR.append(next_image_HDR.unsqueeze(0))
+                next_mask = next_viewpoint_cam.mask.cuda()
+                next_masks.append(next_mask.unsqueeze(0))
+
         radii = torch.cat(radii_list,0).max(dim=0).values
         visibility_filter = torch.cat(visibility_filter_list).any(dim=0)
-        image_tensor = torch.cat(images,0)
+        images_LDR_from3d_tensor = torch.cat(images_LDR_from3d, 0)
+        images_LDR_from2d_tensor = torch.cat(images_LDR_from2d, 0)
+        images_HDR_tensor = torch.cat(images_HDR, 0)
         depth_tensor = torch.cat(depths, 0)
         gt_image_tensor = torch.cat(gt_images,0)
         gt_depth_tensor = torch.cat(gt_depths, 0)
         mask_tensor = torch.cat(masks, 0)
+        if iteration > 3000:
+            previous_images_HDR_tensor = torch.cat(previous_images_HDR, 0)
+            previous_mask_tensor = torch.cat(previous_masks, 0)
+            next_images_HDR_tensor = torch.cat(next_images_HDR, 0)
+            next_mask_tensor = torch.cat(next_masks, 0)
         
-        Ll1 = l1_loss(image_tensor, gt_image_tensor, mask_tensor)
-        
+        Ll1_ldr_from3d = l1_loss(images_LDR_from3d_tensor, gt_image_tensor, mask_tensor)
+        Ll1_ldr_from2d = l1_loss(images_LDR_from2d_tensor, gt_image_tensor, mask_tensor)
+
+        loss_3d = Ll1_ldr_from3d
+        loss_2d = Ll1_ldr_from2d
+
         if (gt_depth_tensor!=0).sum() < 10:
             depth_loss = torch.tensor(0.).cuda()
         else:
@@ -127,12 +167,19 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
             gt_depth_tensor[gt_depth_tensor!=0] = 1 / gt_depth_tensor[gt_depth_tensor!=0]
      
             depth_loss = l1_loss(depth_tensor, gt_depth_tensor, mask_tensor)
+
+        img_3d_tvloss = TV_loss(images_LDR_from3d_tensor)
+        img_2d_tvloss = TV_loss(images_LDR_from2d_tensor)
+        depth_tvloss = TV_loss(depth_tensor)
         
-      
-        psnr_ = psnr(image_tensor, gt_image_tensor, mask_tensor).mean().double()        
-        loss = Ll1 + depth_loss 
-        
+        loss = loss_3d + loss_2d + depth_loss + 0.01 * (img_3d_tvloss + img_2d_tvloss + depth_tvloss) + 5 * unit_expos_loss(gaussians.get_tone_mapper, 0.6)
+
+        if iteration > 3000:
+            loss = loss + 1 * (temporal_luminance_loss(images_HDR_tensor, previous_images_HDR_tensor, mask_tensor | previous_mask_tensor) + temporal_luminance_loss(images_HDR_tensor, next_images_HDR_tensor, mask_tensor | next_mask_tensor))
+
         loss.backward()
+
+        psnr_ = psnr(images_LDR_from3d_tensor, gt_image_tensor, mask_tensor).mean().double()        
         viewspace_point_tensor_grad = torch.zeros_like(viewspace_point_tensor)
         for idx in range(0, len(viewspace_point_tensor_list)):
             viewspace_point_tensor_grad = viewspace_point_tensor_grad + viewspace_point_tensor_list[idx].grad
@@ -154,7 +201,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
             # Log and save
             timer.pause()
             # training_report(tb_writer, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, [pipe, background])
-            training_report(tb_writer, iteration, Ll1, loss, loss, iter_time, testing_iterations, scene, render, [pipe, background])
+            # training_report(tb_writer, iteration, Ll1, loss, loss, iter_time, testing_iterations, scene, render, [pipe, background])
             if (iteration in saving_iterations):
                 print("\n[ITER {}] Saving Gaussians".format(iteration))
                 scene.save(iteration, 'fine')
@@ -248,7 +295,7 @@ if __name__ == "__main__":
     parser.add_argument('--debug_from', type=int, default=-1)
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
     parser.add_argument("--test_iterations", nargs="+", type=int, default=[i*500 for i in range(0,120)])
-    parser.add_argument("--save_iterations", nargs="+", type=int, default=[3000,])
+    parser.add_argument("--save_iterations", nargs="+", type=int, default=[3000,7000])
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--start_checkpoint", type=str, default = None)

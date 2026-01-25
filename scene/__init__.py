@@ -12,6 +12,7 @@
 import os
 import random
 import json
+import torch
 from utils.system_utils import searchForMaxIteration
 from scene.dataset_readers import sceneLoadTypeCallbacks
 from scene.flexible_deform_model import GaussianModel
@@ -72,7 +73,9 @@ class Scene:
                                                     "point_cloud",
                                                     "iteration_" + str(self.loaded_iter),
                                                    ))
-            self.gaussians.load_irradiance(os.path.join(self.model_path, "irradiance_mlp.pth"))
+            self.gaussians.load_color_mlp(os.path.join(self.model_path, "color_mlp.pth"))
+            self.gaussians.load_tone_mapper(os.path.join(self.model_path, "tone_mapper.pth"))
+            self.load_exposure_time(os.path.join(self.model_path, "exposure_time.json"))
         else:
             self.gaussians.create_from_pcd(scene_info.point_cloud, args.camera_extent, self.maxtime)
 
@@ -83,7 +86,9 @@ class Scene:
             point_cloud_path = os.path.join(self.model_path, "point_cloud/iteration_{}".format(iteration))
         self.gaussians.save_ply(os.path.join(point_cloud_path, "point_cloud.ply"))
         # self.gaussians.save_deformation(point_cloud_path)
-        self.gaussians.save_irradiance(os.path.join(self.model_path, "irradiance_mlp.pth"))
+        self.gaussians.save_color_mlp(os.path.join(self.model_path, "color_mlp.pth"))
+        self.gaussians.save_tone_mapper(os.path.join(self.model_path, "tone_mapper.pth"))
+        self.save_exposure_time(os.path.join(self.model_path, "exposure_time.json"))
     
     def getTrainCameras(self, scale=1.0):
         return self.train_camera
@@ -94,3 +99,30 @@ class Scene:
     def getVideoCameras(self, scale=1.0):
         return self.video_camera
     
+    def save_exposure_time(self, path):
+        rows = []
+        for camera in self.train_camera:
+            rows.append({
+                "image": camera.image_name,
+                "exposure_time": float(camera.exposure_time.detach().cpu().item())
+            })
+
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(rows, f, ensure_ascii=False, indent=2)
+
+    def load_exposure_time(self, path, default=1.0):
+        with open(path, "r", encoding="utf-8") as f:
+            rows = json.load(f)
+
+        exp_map = {r["image"]: float(r["exposure_time"]) for r in rows}
+
+        def apply(cams):
+            for cam in cams:
+                v = exp_map.get(cam.image_name, default)
+                with torch.no_grad():
+                    cam.exposure_time.data.fill_(v)
+
+        apply(self.train_camera)
+        apply(self.test_camera)
+        apply(self.video_camera)
