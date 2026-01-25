@@ -5,11 +5,12 @@ set -e
 # ARGUMENTS
 #########################
 EXP_GROUP=$1    # exp1, exp2, exp3
-SCENE=$2        # pulling, cutting
+DATASET=$2      # EndoNeRF-EC, StereoMIS
+SCENE=$3        # pulling_soft_tissues, cutting_tissues_twice, P1_1, P1_2
 
-if [ -z "$EXP_GROUP" ] || [ -z "$SCENE" ]; then
-    echo "Usage: ./run.sh <exp_group> <scene>"
-    echo "Example: ./run.sh exp7 pulling"
+if [ -z "$EXP_GROUP" ] || [ -z "$DATASET" ] || [ -z "$SCENE" ]; then
+    echo "Usage: ./run.sh <exp_group> <dataset> <scene>"
+    echo "Example: ./run.sh exp1 EndoNeRF-EC pulling_soft_tissues"
     exit 1
 fi
 
@@ -17,16 +18,16 @@ fi
 # PATHS
 #########################
 
-DATA_ROOT="/media/dial2/Ubuntu Volume/dataset/EndoNeRF-EC"
-DATA_PATH="$DATA_ROOT/$SCENE"
+DATA_ROOT="/media/dial2/Ubuntu Volume/dataset"
+DATA_PATH="$DATA_ROOT/$DATASET/$SCENE"
 
-EXP_NAME="$EXP_GROUP/endonerf-ec/$SCENE"
+EXP_NAME="$EXP_GROUP/$DATASET/$SCENE"
 MODEL_PATH="output/$EXP_NAME"
 
 echo "======================================"
 echo "Experiment group : $EXP_GROUP"
 echo "Scene            : $SCENE"
-echo "Dataset          : $DATA_PATH"
+echo "Dataset          : $DATASET"
 echo "Exp name         : $EXP_NAME"
 echo "Model output     : $MODEL_PATH"
 echo "======================================"
