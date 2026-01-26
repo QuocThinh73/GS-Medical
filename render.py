@@ -37,6 +37,7 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     hdr_render_path = os.path.join(model_path, name, "ours_{}".format(iteration), "hdr_renders")
     depth_path = os.path.join(model_path, name, "ours_{}".format(iteration), "depth")
     gts_path = os.path.join(model_path, name, "ours_{}".format(iteration), "gt")
+    normal_gts_path = os.path.join(model_path, name, "ours_{}".format(iteration), "normal_gt")
     gt_depth_path = os.path.join(model_path, name, "ours_{}".format(iteration), "gt_depth")
     masks_path = os.path.join(model_path, name, "ours_{}".format(iteration), "masks")
     consistent_ldr_images_from3d_path = os.path.join(model_path, name, "ours_{}".format(iteration), "consistent_ldr_from3d_renders")
@@ -47,6 +48,7 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     makedirs(hdr_render_path, exist_ok=True)
     makedirs(depth_path, exist_ok=True)
     makedirs(gts_path, exist_ok=True)
+    makedirs(normal_gts_path, exist_ok=True)
     makedirs(gt_depth_path, exist_ok=True)
     makedirs(masks_path, exist_ok=True)
     makedirs(consistent_ldr_images_from3d_path, exist_ok=True)
@@ -59,6 +61,7 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     consistent_ldr_images_from2d = []
     render_depths = []
     gt_list = []
+    normal_gt_list = []
     gt_depths = []
     mask_list = []
 
@@ -81,6 +84,8 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
         if name in ["train", "test", "video"]:
             gt = view.original_image[0:3, :, :]
             gt_list.append(gt)
+            normal_gt = view.original_normal_image[0:3, :, :]
+            normal_gt_list.append(normal_gt)
             mask = view.mask
             mask_list.append(mask)
             gt_depth = view.original_depth
@@ -102,6 +107,13 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     if len(gt_list) != 0:
         for image in tqdm(gt_list):
             torchvision.utils.save_image(image, os.path.join(gts_path, '{0:05d}'.format(count) + ".png"))
+            count+=1
+
+    count = 0
+    print("writing normal images.")
+    if len(normal_gt_list) != 0:
+        for normal_image in tqdm(normal_gt_list):
+            torchvision.utils.save_image(normal_image, os.path.join(normal_gts_path, '{0:05d}'.format(count) + ".png"))
             count+=1
             
     count = 0
@@ -186,6 +198,10 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     gt_array = torch.stack(gt_list, dim=0).permute(0, 2, 3, 1)
     gt_array = (gt_array*255).clip(0, 255).cpu().numpy().astype(np.uint8)
     imageio.mimwrite(os.path.join(model_path, name, "ours_{}".format(iteration), 'gt_video.mp4'), gt_array, fps=30, quality=8)
+
+    normal_gt_array = torch.stack(normal_gt_list, dim=0).permute(0, 2, 3, 1)
+    normal_gt_array = (normal_gt_array*255).clip(0, 255).cpu().numpy().astype(np.uint8)
+    imageio.mimwrite(os.path.join(model_path, name, "ours_{}".format(iteration), 'normal_gt_video.mp4'), normal_gt_array, fps=30, quality=8)
                     
     FoVy, FoVx, height, width = view.FoVy, view.FoVx, view.image_height, view.image_width
     focal_y, focal_x = fov2focal(FoVy, height), fov2focal(FoVx, width)

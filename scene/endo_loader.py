@@ -172,10 +172,12 @@ class EndoNeRF_Dataset(object):
         # get paths of images, depths, masks, etc.
         agg_fn = lambda filetype: sorted(glob.glob(os.path.join(self.root_dir, filetype, "*.png")))
         self.image_paths = agg_fn("images")
+        self.normal_image_paths = agg_fn("normal_images")
         self.depth_paths = agg_fn("depth")
         self.masks_paths = agg_fn("masks")
 
         assert len(self.image_paths) == poses.shape[0], "the number of images should equal to the number of poses"
+        assert len(self.normal_image_paths) == poses.shape[0], "the number of normal images should equal to the number of poses"
         assert len(self.depth_paths) == poses.shape[0], "the number of depth images should equal to number of poses"
         assert len(self.masks_paths) == poses.shape[0], "the number of masks should equal to the number of poses"
         
@@ -213,6 +215,9 @@ class EndoNeRF_Dataset(object):
             # color
             color = np.array(Image.open(self.image_paths[idx]))/255.0
             image = self.transform(color)
+            # normal color
+            normal_color = np.array(Image.open(self.normal_image_paths[idx]))/255.0
+            normal_image = self.transform(normal_color)
             # times           
             time = self.image_times[idx]
             # poses
@@ -224,7 +229,7 @@ class EndoNeRF_Dataset(object):
             img_name = os.path.basename(self.image_paths[idx])
             brightness = self.brightness_map.get(img_name, None)
 
-            cameras.append(Camera(colmap_id=idx, R=R, T=T, FoVx=FovX, FoVy=FovY,image=image, depth=depth, mask=mask, gt_alpha_mask=None, brightness=brightness,
+            cameras.append(Camera(colmap_id=idx, R=R, T=T, FoVx=FovX, FoVy=FovY,image=image, normal_image=normal_image, depth=depth, mask=mask, gt_alpha_mask=None, brightness=brightness,
                           image_name=f"{idx}", uid=idx, data_device=torch.device("cuda"), time=time,
                           Znear=None, Zfar=None, K=self.K, h=self.img_wh[1], w=self.img_wh[0]))
         return cameras
