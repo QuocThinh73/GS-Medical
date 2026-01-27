@@ -125,7 +125,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
             visibility_filter_list.append(visibility_filter.unsqueeze(0))
             viewspace_point_tensor_list.append(viewspace_point_tensor)
 
-            if iteration > 3000:
+            if iteration > 7000:
                 previous_viewpoint_cam = viewpoint_stack[idx-1] if idx > 0 else viewpoint_stack[idx]
                 previous_render_pkg = render(previous_viewpoint_cam, gaussians, pipe, background, previous_viewpoint_cam.exposure_time)
                 previous_image_HDR = previous_render_pkg["image_HDR"]
@@ -148,17 +148,14 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         gt_image_tensor = torch.cat(gt_images,0)
         gt_depth_tensor = torch.cat(gt_depths, 0)
         mask_tensor = torch.cat(masks, 0)
-        if iteration > 3000:
+        if iteration > 7000:
             previous_images_HDR_tensor = torch.cat(previous_images_HDR, 0)
             previous_mask_tensor = torch.cat(previous_masks, 0)
             next_images_HDR_tensor = torch.cat(next_images_HDR, 0)
             next_mask_tensor = torch.cat(next_masks, 0)
         
-        Ll1_ldr_from3d = l1_loss(images_LDR_from3d_tensor, gt_image_tensor, mask_tensor)
-        Ll1_ldr_from2d = l1_loss(images_LDR_from2d_tensor, gt_image_tensor, mask_tensor)
-
-        loss_3d = Ll1_ldr_from3d
-        loss_2d = Ll1_ldr_from2d
+        Ll1_ldr_from3d_loss = l1_loss(images_LDR_from3d_tensor, gt_image_tensor, mask_tensor)
+        Ll1_ldr_from2d_loss = l1_loss(images_LDR_from2d_tensor, gt_image_tensor, mask_tensor)
 
         if (gt_depth_tensor!=0).sum() < 10:
             depth_loss = torch.tensor(0.).cuda()
@@ -172,14 +169,15 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         img_2d_tvloss = TV_loss(images_LDR_from2d_tensor)
         depth_tvloss = TV_loss(depth_tensor)
         
-        loss = loss_3d + loss_2d + depth_loss + 0.01 * (img_3d_tvloss + img_2d_tvloss + depth_tvloss) + 5 * unit_expos_loss(gaussians.get_tone_mapper, 0.6)
+        loss = Ll1_ldr_from3d_loss + Ll1_ldr_from2d_loss + depth_loss + 0.01 * (img_3d_tvloss + img_2d_tvloss + depth_tvloss) + 5 * unit_expos_loss(gaussians.get_tone_mapper, 0.6)
 
-        if iteration > 3000:
+        if iteration > 7000:
             loss = loss + 1 * (temporal_luminance_loss(images_HDR_tensor, previous_images_HDR_tensor, mask_tensor | previous_mask_tensor) + temporal_luminance_loss(images_HDR_tensor, next_images_HDR_tensor, mask_tensor | next_mask_tensor))
 
         loss.backward()
 
-        psnr_ = psnr(images_LDR_from3d_tensor, gt_image_tensor, mask_tensor).mean().double()        
+        PSNR_3D = psnr(images_LDR_from3d_tensor, gt_image_tensor, mask_tensor).mean().double()
+        PSNR_2D = psnr(images_LDR_from2d_tensor, gt_image_tensor, mask_tensor).mean().double() 
         viewspace_point_tensor_grad = torch.zeros_like(viewspace_point_tensor)
         for idx in range(0, len(viewspace_point_tensor_list)):
             viewspace_point_tensor_grad = viewspace_point_tensor_grad + viewspace_point_tensor_list[idx].grad
@@ -191,9 +189,13 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
             # Progress bar
             total_point = gaussians._xyz.shape[0]
             if iteration % 10 == 0:
-                progress_bar.set_postfix({"Loss": f"{loss.item():.{7}f}",
-                                          "psnr": f"{psnr_:.{2}f}",
-                                          "point":f"{total_point}"})
+                progress_bar.set_postfix({"Total Loss": f"{loss.item():.{7}f}",
+                                          "Loss 3D": f"{Ll1_ldr_from3d_loss.item():.{7}f}",
+                                          "Loss 2D": f"{Ll1_ldr_from2d_loss.item():.{7}f}",
+                                          "Depth Loss": f"{depth_loss.item():.{7}f}",
+                                          "PSNR 3D": f"{PSNR_3D:.{2}f}",
+                                          "PSNR 2D": f"{PSNR_2D:.{2}f}",
+                                          "Points": f"{total_point}"})
                 progress_bar.update(10)
             if iteration == opt.iterations:
                 progress_bar.close()
@@ -295,7 +297,7 @@ if __name__ == "__main__":
     parser.add_argument('--debug_from', type=int, default=-1)
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
     parser.add_argument("--test_iterations", nargs="+", type=int, default=[i*500 for i in range(0,120)])
-    parser.add_argument("--save_iterations", nargs="+", type=int, default=[3000,7000])
+    parser.add_argument("--save_iterations", nargs="+", type=int, default=[3000, 7000, 10000, 15000])
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--start_checkpoint", type=str, default = None)

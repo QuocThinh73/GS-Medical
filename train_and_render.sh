@@ -9,8 +9,8 @@ DATASET=$2      # EndoNeRF-EC, StereoMIS
 SCENE=$3        # pulling_soft_tissues, cutting_tissues_twice, P1_1, P1_2
 
 if [ -z "$EXP_GROUP" ] || [ -z "$DATASET" ] || [ -z "$SCENE" ]; then
-    echo "Usage: ./run.sh <exp_group> <dataset> <scene>"
-    echo "Example: ./run.sh exp1 EndoNeRF-EC pulling_soft_tissues"
+    echo "Usage: ./train_and_render.sh <exp_group> <dataset> <scene>"
+    echo "Example: ./train_and_render.sh exp1 EndoNeRF-EC pulling_soft_tissues"
     exit 1
 fi
 
@@ -47,8 +47,6 @@ python train.py \
 
 echo "[2/2] Rendering..."
 python render.py \
-    --model_path "$MODEL_PATH" \
-    --skip_test \
-    --skip_train
+    --model_path "$MODEL_PATH"
 
 echo "DONE."

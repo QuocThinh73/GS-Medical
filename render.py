@@ -303,4 +303,4 @@ if __name__ == "__main__":
     render_sets(model.extract(args), hyperparam.extract(args), args.iteration, 
         pipeline.extract(args), 
         args.skip_train, args.skip_test, args.skip_video,
-        args.reconstruct_train,args.reconstruct_test,args.reconstruct_video)
+        args.reconstruct_train, args.reconstruct_test, args.reconstruct_video)
