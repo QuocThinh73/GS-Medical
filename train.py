@@ -125,7 +125,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
             visibility_filter_list.append(visibility_filter.unsqueeze(0))
             viewspace_point_tensor_list.append(viewspace_point_tensor)
 
-            if iteration > 7000:
+            if iteration > opt.tlr_from_iter:
                 previous_viewpoint_cam = viewpoint_stack[idx-1] if idx > 0 else viewpoint_stack[idx]
                 previous_render_pkg = render(previous_viewpoint_cam, gaussians, pipe, background, previous_viewpoint_cam.exposure_time)
                 previous_image_HDR = previous_render_pkg["image_HDR"]
@@ -148,7 +148,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         gt_image_tensor = torch.cat(gt_images,0)
         gt_depth_tensor = torch.cat(gt_depths, 0)
         mask_tensor = torch.cat(masks, 0)
-        if iteration > 7000:
+        if iteration > opt.tlr_from_iter:
             previous_images_HDR_tensor = torch.cat(previous_images_HDR, 0)
             previous_mask_tensor = torch.cat(previous_masks, 0)
             next_images_HDR_tensor = torch.cat(next_images_HDR, 0)
@@ -165,14 +165,16 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
      
             depth_loss = l1_loss(depth_tensor, gt_depth_tensor, mask_tensor)
 
-        img_3d_tvloss = TV_loss(images_LDR_from3d_tensor)
-        img_2d_tvloss = TV_loss(images_LDR_from2d_tensor)
-        depth_tvloss = TV_loss(depth_tensor)
+        img_3d_tvloss = opt.lambda_tv * TV_loss(images_LDR_from3d_tensor)
+        img_2d_tvloss = opt.lambda_tv * TV_loss(images_LDR_from2d_tensor)
+        depth_tvloss = opt.lambda_tv * TV_loss(depth_tensor)
         
-        loss = Ll1_ldr_from3d_loss + Ll1_ldr_from2d_loss + depth_loss + 0.01 * (img_3d_tvloss + img_2d_tvloss + depth_tvloss) + 5 * unit_expos_loss(gaussians.get_tone_mapper, 0.6)
+        loss = Ll1_ldr_from3d_loss + Ll1_ldr_from2d_loss + depth_loss + img_3d_tvloss + img_2d_tvloss + depth_tvloss + 5 * unit_expos_loss(gaussians.get_tone_mapper, 0.6)
 
-        if iteration > 7000:
-            loss = loss + 1 * (temporal_luminance_loss(images_HDR_tensor, previous_images_HDR_tensor, mask_tensor | previous_mask_tensor) + temporal_luminance_loss(images_HDR_tensor, next_images_HDR_tensor, mask_tensor | next_mask_tensor))
+        tlr = 0
+        if iteration > opt.tlr_from_iter:
+            tlr = opt.lambda_tlr * (temporal_luminance_loss(images_HDR_tensor, previous_images_HDR_tensor, mask_tensor | previous_mask_tensor) + temporal_luminance_loss(images_HDR_tensor, next_images_HDR_tensor, mask_tensor | next_mask_tensor))
+            loss = loss + tlr
 
         loss.backward()
 
@@ -193,6 +195,10 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
                                           "Loss 3D": f"{Ll1_ldr_from3d_loss.item():.{7}f}",
                                           "Loss 2D": f"{Ll1_ldr_from2d_loss.item():.{7}f}",
                                           "Depth Loss": f"{depth_loss.item():.{7}f}",
+                                          "TV Loss 3D": f"{img_3d_tvloss.item():.{7}f}",
+                                          "TV Loss 2D": f"{img_2d_tvloss.item():.{7}f}",
+                                          "TV Depth Loss": f"{depth_tvloss.item():.{7}f}",
+                                          "TLR": f"{tlr.item():.{7}f}",
                                           "PSNR 3D": f"{PSNR_3D:.{2}f}",
                                           "PSNR 2D": f"{PSNR_2D:.{2}f}",
                                           "Points": f"{total_point}"})
@@ -297,7 +303,7 @@ if __name__ == "__main__":
     parser.add_argument('--debug_from', type=int, default=-1)
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
     parser.add_argument("--test_iterations", nargs="+", type=int, default=[i*500 for i in range(0,120)])
-    parser.add_argument("--save_iterations", nargs="+", type=int, default=[3000, 7000, 10000, 15000])
+    parser.add_argument("--save_iterations", nargs="+", type=int, default=[op.iterations])
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--start_checkpoint", type=str, default = None)

@@ -128,8 +128,12 @@ class OptimizationParams(ParamGroup):
 
         self.color_mlp_lr = 0.0005
         self.tone_mapper_lr = 0.0005
-        
         self.exposure_time_lr = 0.0005
+
+        self.tlr_from_iter = 3000
+
+        self.lambda_tv = 0.01
+        self.lambda_tlr = 1
 
         super().__init__(parser, "Optimization Parameters")
 

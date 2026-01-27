@@ -9,8 +9,8 @@ DATASET=$2      # EndoNeRF-EC, StereoMIS
 SCENE=$3        # pulling_soft_tissues, cutting_tissues_twice, P1_1, P1_2
 
 if [ -z "$EXP_GROUP" ] || [ -z "$DATASET" ] || [ -z "$SCENE" ]; then
-    echo "Usage: ./train_and_render.sh <exp_group> <dataset> <scene>"
-    echo "Example: ./train_and_render.sh exp1 EndoNeRF-EC pulling_soft_tissues"
+    echo "Usage: ./pipeline.sh <exp_group> <dataset> <scene>"
+    echo "Example: ./pipeline.sh exp1 EndoNeRF-EC pulling_soft_tissues"
     exit 1
 fi
 
@@ -36,7 +36,7 @@ echo "======================================"
 # 1. TRAIN
 #########################
 
-echo "[1/2] Training..."
+echo "[1/4] Training..."
 python train.py \
     -s "$DATA_PATH" \
     --expname "$EXP_NAME"
@@ -45,8 +45,18 @@ python train.py \
 # 2. RENDER
 #########################
 
-echo "[2/2] Rendering..."
+echo "[2/3] Rendering..."
 python render.py \
     --model_path "$MODEL_PATH"
 
-echo "DONE."
+#########################
+# 3. EVALUATION
+#########################
+
+echo "[3/3] Evaluating..."
+python metrics.py \
+    --model_path "$MODEL_PATH"  \
+    -p train
+python metrics.py \
+    --model_path "$MODEL_PATH"  \
+    -p test
