@@ -125,7 +125,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
             visibility_filter_list.append(visibility_filter.unsqueeze(0))
             viewspace_point_tensor_list.append(viewspace_point_tensor)
 
-            if iteration > opt.tlr_from_iter:
+            if iteration > opt.add_tl_loss_from_iter:
                 previous_viewpoint_cam = viewpoint_stack[idx-1] if idx > 0 else viewpoint_stack[idx]
                 previous_render_pkg = render(previous_viewpoint_cam, gaussians, pipe, background, previous_viewpoint_cam.exposure_time)
                 previous_image_HDR = previous_render_pkg["image_HDR"]
@@ -148,7 +148,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         gt_image_tensor = torch.cat(gt_images,0)
         gt_depth_tensor = torch.cat(gt_depths, 0)
         mask_tensor = torch.cat(masks, 0)
-        if iteration > opt.tlr_from_iter:
+        if iteration > opt.add_tl_loss_from_iter:
             previous_images_HDR_tensor = torch.cat(previous_images_HDR, 0)
             previous_mask_tensor = torch.cat(previous_masks, 0)
             next_images_HDR_tensor = torch.cat(next_images_HDR, 0)
@@ -165,16 +165,18 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
      
             depth_loss = l1_loss(depth_tensor, gt_depth_tensor, mask_tensor)
 
-        img_3d_tvloss = opt.lambda_tv * TV_loss(images_LDR_from3d_tensor)
-        img_2d_tvloss = opt.lambda_tv * TV_loss(images_LDR_from2d_tensor)
-        depth_tvloss = opt.lambda_tv * TV_loss(depth_tensor)
-        
-        loss = Ll1_ldr_from3d_loss + Ll1_ldr_from2d_loss + depth_loss + img_3d_tvloss + img_2d_tvloss + depth_tvloss + 5 * unit_expos_loss(gaussians.get_tone_mapper, 0.6)
+        img_3d_tv_loss = opt.lambda_tv * TV_loss(images_LDR_from3d_tensor)
+        img_2d_tv_loss = opt.lambda_tv * TV_loss(images_LDR_from2d_tensor)
+        depth_tv_loss = opt.lambda_tv * TV_loss(depth_tensor)
 
-        tlr = 0
-        if iteration > opt.tlr_from_iter:
-            tlr = opt.lambda_tlr * (temporal_luminance_loss(images_HDR_tensor, previous_images_HDR_tensor, mask_tensor | previous_mask_tensor) + temporal_luminance_loss(images_HDR_tensor, next_images_HDR_tensor, mask_tensor | next_mask_tensor))
-            loss = loss + tlr
+        ue_loss = opt.lambda_ue * unit_expos_loss(gaussians.get_tone_mapper, 0.6)
+        
+        loss = Ll1_ldr_from3d_loss + Ll1_ldr_from2d_loss + depth_loss + img_3d_tv_loss + img_2d_tv_loss + depth_tv_loss + ue_loss
+
+        tl_loss = 0
+        if iteration > opt.add_tl_loss_from_iter:
+            tl_loss = opt.lambda_tl * (temporal_luminance_loss(images_HDR_tensor, previous_images_HDR_tensor, mask_tensor | previous_mask_tensor) + temporal_luminance_loss(images_HDR_tensor, next_images_HDR_tensor, mask_tensor | next_mask_tensor))
+            loss = loss + tl_loss
 
         loss.backward()
 
@@ -195,10 +197,11 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
                                           "Loss 3D": f"{Ll1_ldr_from3d_loss.item():.{7}f}",
                                           "Loss 2D": f"{Ll1_ldr_from2d_loss.item():.{7}f}",
                                           "Depth Loss": f"{depth_loss.item():.{7}f}",
-                                          "TV Loss 3D": f"{img_3d_tvloss.item():.{7}f}",
-                                          "TV Loss 2D": f"{img_2d_tvloss.item():.{7}f}",
-                                          "TV Depth Loss": f"{depth_tvloss.item():.{7}f}",
-                                          "TLR": f"{tlr.item():.{7}f}",
+                                          "TV Loss 3D": f"{img_3d_tv_loss.item():.{7}f}",
+                                          "TV Loss 2D": f"{img_2d_tv_loss.item():.{7}f}",
+                                          "TV Depth Loss": f"{depth_tv_loss.item():.{7}f}",
+                                          "UE Loss": f"{ue_loss.item():.{7}f}",
+                                          "TL Loss": f"{tl_loss.item():.{7}f}",
                                           "PSNR 3D": f"{PSNR_3D:.{2}f}",
                                           "PSNR 2D": f"{PSNR_2D:.{2}f}",
                                           "Points": f"{total_point}"})
