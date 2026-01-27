@@ -36,7 +36,7 @@ echo "======================================"
 # 1. TRAIN
 #########################
 
-echo "[1/4] Training..."
+echo "[1/3] Training..."
 python train.py \
     -s "$DATA_PATH" \
     --expname "$EXP_NAME"
