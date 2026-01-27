@@ -173,7 +173,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         
         loss = Ll1_ldr_from3d_loss + Ll1_ldr_from2d_loss + depth_loss + img_3d_tv_loss + img_2d_tv_loss + depth_tv_loss + ue_loss
 
-        tl_loss = 0
+        tl_loss = torch.tensor(0, device="cuda")
         if iteration > opt.add_tl_loss_from_iter:
             tl_loss = opt.lambda_tl * (temporal_luminance_loss(images_HDR_tensor, previous_images_HDR_tensor, mask_tensor | previous_mask_tensor) + temporal_luminance_loss(images_HDR_tensor, next_images_HDR_tensor, mask_tensor | next_mask_tensor))
             loss = loss + tl_loss
@@ -193,15 +193,15 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
             # Progress bar
             total_point = gaussians._xyz.shape[0]
             if iteration % 10 == 0:
-                progress_bar.set_postfix({"Total Loss": f"{loss.item():.{7}f}",
-                                          "Loss 3D": f"{Ll1_ldr_from3d_loss.item():.{7}f}",
-                                          "Loss 2D": f"{Ll1_ldr_from2d_loss.item():.{7}f}",
-                                          "Depth Loss": f"{depth_loss.item():.{7}f}",
-                                          "TV Loss 3D": f"{img_3d_tv_loss.item():.{7}f}",
-                                          "TV Loss 2D": f"{img_2d_tv_loss.item():.{7}f}",
-                                          "TV Depth Loss": f"{depth_tv_loss.item():.{7}f}",
-                                          "UE Loss": f"{ue_loss.item():.{7}f}",
-                                          "TL Loss": f"{tl_loss.item():.{7}f}",
+                progress_bar.set_postfix({"Loss": f"{loss.item():.{4}f}",
+                                          "Loss 3D": f"{Ll1_ldr_from3d_loss.item():.{4}f}",
+                                          "Loss 2D": f"{Ll1_ldr_from2d_loss.item():.{4}f}",
+                                          "Depth Loss": f"{depth_loss.item():.{4}f}",
+                                          "TV Loss 3D": f"{img_3d_tv_loss.item():.{4}f}",
+                                          "TV Loss 2D": f"{img_2d_tv_loss.item():.{4}f}",
+                                          "TV Depth Loss": f"{depth_tv_loss.item():.{4}f}",
+                                          "UE Loss": f"{ue_loss.item():.{4}f}",
+                                          "TL Loss": f"{tl_loss.item():.{4}f}",
                                           "PSNR 3D": f"{PSNR_3D:.{2}f}",
                                           "PSNR 2D": f"{PSNR_2D:.{2}f}",
                                           "Points": f"{total_point}"})
@@ -306,7 +306,7 @@ if __name__ == "__main__":
     parser.add_argument('--debug_from', type=int, default=-1)
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
     parser.add_argument("--test_iterations", nargs="+", type=int, default=[i*500 for i in range(0,120)])
-    parser.add_argument("--save_iterations", nargs="+", type=int, default=[op.iterations])
+    parser.add_argument("--save_iterations", nargs="+", type=int, default=[7000])
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--start_checkpoint", type=str, default = None)

@@ -132,7 +132,7 @@ class OptimizationParams(ParamGroup):
 
         self.add_tl_loss_from_iter = 3000
 
-        self.lambda_tv = 0.01
+        self.lambda_tv = 0.5
         self.lambda_tl = 1
         self.lambda_ue = 5
 
