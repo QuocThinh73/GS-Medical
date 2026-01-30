@@ -2,7 +2,7 @@ import torch
 import os
 from PIL import Image, ImageDraw, ImageFont
 from matplotlib import pyplot as plt
-plt.rcParams['font.sans-serif'] = ['Times New Roman']
+# plt.rcParams['font.sans-serif'] = ['Times New Roman']
 
 import numpy as np
 
