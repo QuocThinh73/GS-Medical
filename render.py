@@ -90,7 +90,7 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
             mask_list.append(mask)
             gt_depth = view.original_depth
             gt_depths.append(gt_depth)
-    
+
     if render_test:
         test_times = 20
         for i in range(test_times):

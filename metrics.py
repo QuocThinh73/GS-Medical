@@ -150,13 +150,13 @@ def evaluate(model_paths):
                 consistent_ldr_from3d_ssims = []
                 consistent_ldr_from3d_psnrs = []
                 consistent_ldr_from3d_lpipss = []
-                if args.phase == "train":
-                    ldr_from2d_ssims = []
-                    ldr_from2d_psnrs = []
-                    ldr_from2d_lpipss = []
-                    ldr_from3d_ssims = []
-                    ldr_from3d_psnrs = []
-                    ldr_from3d_lpipss = []
+                # if args.phase == "train":
+                ldr_from2d_ssims = []
+                ldr_from2d_psnrs = []
+                ldr_from2d_lpipss = []
+                ldr_from3d_ssims = []
+                ldr_from3d_psnrs = []
+                ldr_from3d_lpipss = []
                 rmses = []
                                 
                 for idx in tqdm(range(len(gts)), desc="Metric evaluation progress"):
@@ -183,17 +183,17 @@ def evaluate(model_paths):
                     consistent_ldr_from3d_ssims.append(ssim(consistent_ldr_from3d_render, normal_gt))
                     consistent_ldr_from3d_lpipss.append(cal_lpips(consistent_ldr_from3d_render, normal_gt))
 
-                    if args.phase == "train":
-                        ldr_from2d_render = ldr_from2d_render * mask
-                        ldr_from3d_render = ldr_from3d_render * mask
-                        gt = gt * mask
+                    # if args.phase == "train":
+                    ldr_from2d_render = ldr_from2d_render * mask
+                    ldr_from3d_render = ldr_from3d_render * mask
+                    gt = gt * mask
 
-                        ldr_from2d_ssims.append(psnr(ldr_from2d_render, gt))
-                        ldr_from2d_psnrs.append(ssim(ldr_from2d_render, gt))
-                        ldr_from2d_lpipss.append(cal_lpips(ldr_from2d_render, gt))
-                        ldr_from3d_ssims.append(psnr(ldr_from3d_render, gt))
-                        ldr_from3d_psnrs.append(ssim(ldr_from3d_render, gt))
-                        ldr_from3d_lpipss.append(cal_lpips(ldr_from3d_render, gt))
+                    ldr_from2d_ssims.append(psnr(ldr_from2d_render, gt))
+                    ldr_from2d_psnrs.append(ssim(ldr_from2d_render, gt))
+                    ldr_from2d_lpipss.append(cal_lpips(ldr_from2d_render, gt))
+                    ldr_from3d_ssims.append(psnr(ldr_from3d_render, gt))
+                    ldr_from3d_psnrs.append(ssim(ldr_from3d_render, gt))
+                    ldr_from3d_lpipss.append(cal_lpips(ldr_from3d_render, gt))
 
                     if (depth_gt!=0).sum() < 10:
                         continue
@@ -205,13 +205,13 @@ def evaluate(model_paths):
                 print("Scene: ", scene_dir,  "Consistent LDR from 3D image SSIM : {:>12.7f}".format(torch.tensor(consistent_ldr_from3d_ssims).mean(), ".5"))
                 print("Scene: ", scene_dir,  "Consistent LDR from 3D image PSNR : {:>12.7f}".format(torch.tensor(consistent_ldr_from3d_psnrs).mean(), ".5"))
                 print("Scene: ", scene_dir,  "Consistent LDR from 3D image LPIPS: {:>12.7f}".format(torch.tensor(consistent_ldr_from3d_lpipss).mean(), ".5"))
-                if args.phase == "train":
-                    print("Scene: ", scene_dir,  "LDR from 2D image SSIM : {:>12.7f}".format(torch.tensor(ldr_from2d_ssims).mean(), ".5"))
-                    print("Scene: ", scene_dir,  "LDR from 2D image PSNR : {:>12.7f}".format(torch.tensor(ldr_from2d_psnrs).mean(), ".5"))
-                    print("Scene: ", scene_dir,  "LDR from 2D image LPIPS: {:>12.7f}".format(torch.tensor(ldr_from2d_lpipss).mean(), ".5"))
-                    print("Scene: ", scene_dir,  "LDR from 3D image SSIM : {:>12.7f}".format(torch.tensor(ldr_from3d_ssims).mean(), ".5"))
-                    print("Scene: ", scene_dir,  "LDR from 3D image PSNR : {:>12.7f}".format(torch.tensor(ldr_from3d_psnrs).mean(), ".5"))
-                    print("Scene: ", scene_dir,  "LDR from 3D image LPIPS: {:>12.7f}".format(torch.tensor(ldr_from3d_lpipss).mean(), ".5"))
+                # if args.phase == "train":
+                print("Scene: ", scene_dir,  "LDR from 2D image SSIM : {:>12.7f}".format(torch.tensor(ldr_from2d_ssims).mean(), ".5"))
+                print("Scene: ", scene_dir,  "LDR from 2D image PSNR : {:>12.7f}".format(torch.tensor(ldr_from2d_psnrs).mean(), ".5"))
+                print("Scene: ", scene_dir,  "LDR from 2D image LPIPS: {:>12.7f}".format(torch.tensor(ldr_from2d_lpipss).mean(), ".5"))
+                print("Scene: ", scene_dir,  "LDR from 3D image SSIM : {:>12.7f}".format(torch.tensor(ldr_from3d_ssims).mean(), ".5"))
+                print("Scene: ", scene_dir,  "LDR from 3D image PSNR : {:>12.7f}".format(torch.tensor(ldr_from3d_psnrs).mean(), ".5"))
+                print("Scene: ", scene_dir,  "LDR from 3D image LPIPS: {:>12.7f}".format(torch.tensor(ldr_from3d_lpipss).mean(), ".5"))
                 print("Scene: ", scene_dir,  "Depth map RMSE: {:>12.7f}".format(torch.tensor(rmses).mean(), ".5"))
                 print("")
 
@@ -228,20 +228,20 @@ def evaluate(model_paths):
                                                             "Consistent LDR from 3D image PSNRS": {name: psnr for psnr, name in zip(torch.tensor(consistent_ldr_from3d_psnrs).tolist(), image_names)},
                                                             "Consistent LDR from 3D image LPIPSS": {name: lp for lp, name in zip(torch.tensor(consistent_ldr_from3d_lpipss).tolist(), image_names)}})
                 
-                if args.phase == "train":
-                    full_dict[scene_dir][method].update({"LDR from 2D image SSIM": torch.tensor(ldr_from2d_ssims).mean().item(),
-                                                        "LDR from 2D image PSNR": torch.tensor(ldr_from2d_psnrs).mean().item(),
-                                                        "LDR from 2D image LPIPS": torch.tensor(ldr_from2d_lpipss).mean().item(),
-                                                        "LDR from 3D image SSIM": torch.tensor(ldr_from3d_ssims).mean().item(),
-                                                        "LDR from 3D image PSNR": torch.tensor(ldr_from3d_psnrs).mean().item(),
-                                                        "LDR from 3D image LPIPS": torch.tensor(ldr_from3d_lpipss).mean().item()})
-                    
-                    per_view_dict[scene_dir][method].update({"LDR from 2D image SSIMS": {name: ssim for ssim, name in zip(torch.tensor(ldr_from2d_ssims).tolist(), image_names)},
-                                                            "LDR from 2D image PSNRS": {name: psnr for psnr, name in zip(torch.tensor(ldr_from2d_psnrs).tolist(), image_names)},
-                                                            "LDR from 2D image LPIPSS": {name: lp for lp, name in zip(torch.tensor(ldr_from2d_lpipss).tolist(), image_names)},
-                                                            "LDR from 3D image SSIMS": {name: ssim for ssim, name in zip(torch.tensor(ldr_from3d_ssims).tolist(), image_names)},
-                                                            "LDR from 3D image PSNRS": {name: psnr for psnr, name in zip(torch.tensor(ldr_from3d_psnrs).tolist(), image_names)},
-                                                            "LDR from 3D image LPIPSS": {name: lp for lp, name in zip(torch.tensor(ldr_from3d_lpipss).tolist(), image_names)}})
+                # if args.phase == "train":
+                full_dict[scene_dir][method].update({"LDR from 2D image SSIM": torch.tensor(ldr_from2d_ssims).mean().item(),
+                                                    "LDR from 2D image PSNR": torch.tensor(ldr_from2d_psnrs).mean().item(),
+                                                    "LDR from 2D image LPIPS": torch.tensor(ldr_from2d_lpipss).mean().item(),
+                                                    "LDR from 3D image SSIM": torch.tensor(ldr_from3d_ssims).mean().item(),
+                                                    "LDR from 3D image PSNR": torch.tensor(ldr_from3d_psnrs).mean().item(),
+                                                    "LDR from 3D image LPIPS": torch.tensor(ldr_from3d_lpipss).mean().item()})
+                
+                per_view_dict[scene_dir][method].update({"LDR from 2D image SSIMS": {name: ssim for ssim, name in zip(torch.tensor(ldr_from2d_ssims).tolist(), image_names)},
+                                                        "LDR from 2D image PSNRS": {name: psnr for psnr, name in zip(torch.tensor(ldr_from2d_psnrs).tolist(), image_names)},
+                                                        "LDR from 2D image LPIPSS": {name: lp for lp, name in zip(torch.tensor(ldr_from2d_lpipss).tolist(), image_names)},
+                                                        "LDR from 3D image SSIMS": {name: ssim for ssim, name in zip(torch.tensor(ldr_from3d_ssims).tolist(), image_names)},
+                                                        "LDR from 3D image PSNRS": {name: psnr for psnr, name in zip(torch.tensor(ldr_from3d_psnrs).tolist(), image_names)},
+                                                        "LDR from 3D image LPIPSS": {name: lp for lp, name in zip(torch.tensor(ldr_from3d_lpipss).tolist(), image_names)}})
                     
                 full_dict[scene_dir][method].update({"Depth map RMSE": torch.tensor(rmses).mean().item()})
                 per_view_dict[scene_dir][method].update({"Depth map RMSES": {name: lp for lp, name in zip(torch.tensor(rmses).tolist(), image_names)}})

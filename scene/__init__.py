@@ -106,12 +106,17 @@ class Scene:
                 "image": camera.image_name,
                 "exposure_time": float(camera.exposure_time.detach().cpu().item())
             })
+        for camera in self.test_camera:
+            rows.append({
+                "image": camera.image_name,
+                "exposure_time": float(camera.exposure_time.detach().cpu().item())
+            })
 
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(rows, f, ensure_ascii=False, indent=2)
 
-    def load_exposure_time(self, path, default=1.0):
+    def load_exposure_time(self, path):
         with open(path, "r", encoding="utf-8") as f:
             rows = json.load(f)
 
@@ -119,7 +124,7 @@ class Scene:
 
         def apply(cams):
             for cam in cams:
-                v = exp_map.get(cam.image_name, default)
+                v = exp_map.get(cam.image_name, None)
                 with torch.no_grad():
                     cam.exposure_time.data.fill_(v)
 
