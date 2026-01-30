@@ -209,10 +209,28 @@ def process(folder_gt, folder_render, folder_mask, folder_out):
 
 
 if __name__ == "__main__":
-    root_dir = "output/Deform3DGS-baseline/EndoNeRF/cutting_tissues_twice/video/ours_3000/"
+    root_dir = "output/exp14/endonerf-ec/pulling_soft_tissues/train/ours_7000/"
     process(
         os.path.join(root_dir, "gt"),
-        os.path.join(root_dir, "renders"),
+        os.path.join(root_dir, "ldr_from2d_renders"),
         os.path.join(root_dir, "masks"),
-        os.path.join(root_dir, "errors"),
+        os.path.join(root_dir, "errors_ldr_from2d"),
+    )
+    process(
+        os.path.join(root_dir, "gt"),
+        os.path.join(root_dir, "ldr_from3d_renders"),
+        os.path.join(root_dir, "masks"),
+        os.path.join(root_dir, "errors_ldr_from3d"),
+    )
+    process(
+        os.path.join(root_dir, "normal_gt"),
+        os.path.join(root_dir, "consistent_ldr_from2d_renders"),
+        os.path.join(root_dir, "masks"),
+        os.path.join(root_dir, "errors_consistent_ldr_from2d"),
+    )
+    process(
+        os.path.join(root_dir, "normal_gt"),
+        os.path.join(root_dir, "consistent_ldr_from3d_renders"),
+        os.path.join(root_dir, "masks"),
+        os.path.join(root_dir, "errors_consistent_ldr_from3d"),
     )
