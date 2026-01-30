@@ -176,11 +176,11 @@ def evaluate(model_paths):
                     consistent_ldr_from3d_render = consistent_ldr_from3d_render * mask
                     normal_gt = normal_gt * mask
                     
-                    consistent_ldr_from2d_ssims.append(psnr(consistent_ldr_from2d_render, normal_gt))
-                    consistent_ldr_from2d_psnrs.append(ssim(consistent_ldr_from2d_render, normal_gt))
+                    consistent_ldr_from2d_psnrs.append(psnr(consistent_ldr_from2d_render, normal_gt))
+                    consistent_ldr_from2d_ssims.append(ssim(consistent_ldr_from2d_render, normal_gt))
                     consistent_ldr_from2d_lpipss.append(cal_lpips(consistent_ldr_from2d_render, normal_gt))
-                    consistent_ldr_from3d_ssims.append(psnr(consistent_ldr_from3d_render, normal_gt))
-                    consistent_ldr_from3d_psnrs.append(ssim(consistent_ldr_from3d_render, normal_gt))
+                    consistent_ldr_from3d_psnrs.append(psnr(consistent_ldr_from3d_render, normal_gt))
+                    consistent_ldr_from3d_ssims.append(ssim(consistent_ldr_from3d_render, normal_gt))
                     consistent_ldr_from3d_lpipss.append(cal_lpips(consistent_ldr_from3d_render, normal_gt))
 
                     if args.phase == "train":
