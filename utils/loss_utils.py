@@ -13,6 +13,7 @@ import torch
 import torch.nn.functional as F
 from torch.autograd import Variable
 from math import exp
+from utils.flow_utils import flow_warp
 
 
 def TV_loss(x, mask=None):
@@ -96,21 +97,28 @@ def unit_expos_loss(tone_mapper, gt):
     
     return torch.mean((rgb_l - gt) ** 2)
 
-def temporal_luminance_loss(frame1, frame2, mask=None):
-    loss = torch.abs(frame1 - frame2)
-    if mask.ndim == 4:
-        mask = mask.repeat(1, frame1.shape[1], 1, 1)
-    elif mask.ndim == 3:
-        mask = mask.repeat(frame1.shape[1], 1, 1)
-    else:
-        raise ValueError('the dimension of mask should be either 3 or 4')
-    
-    try:
-        loss = loss[mask!=0]
-    except:
-        print(loss.shape)
-        print(mask.shape)
-        print(loss.dtype)
-        print(mask.dtype)
-    
-    return loss.mean()
+def _in_bounds_mask(flow):
+    B, _, H, W = flow.shape
+    device = flow.device
+    y, x = torch.meshgrid(
+        torch.arange(H, device=device),
+        torch.arange(W, device=device),
+        indexing="ij"
+    )
+    grid = torch.stack([x, y], dim=0).float()[None].repeat(B, 1, 1, 1)
+    coords = grid + flow
+    x = coords[:, 0]
+    y = coords[:, 1]
+    ok = (x >= 0) & (x <= (W - 1)) & (y >= 0) & (y <= (H - 1))
+    return ok[:, None]
+
+def temporal_luminance_loss(img_src, img_dest, flow, mask_src, mask_dest):
+    warp = flow_warp(img_src, flow, mode="bilinear", padding_mode="zeros")
+
+    tissue_dest_at = flow_warp(mask_dest.float(), flow, mode="nearest", padding_mode="zeros") > 0.5
+
+    inb = _in_bounds_mask(flow)
+
+    valid_mask = (mask_src > 0.5) & tissue_dest_at & inb
+
+    return l1_loss(warp, img_dest, valid_mask)

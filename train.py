@@ -126,18 +126,24 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
             viewspace_point_tensor_list.append(viewspace_point_tensor)
 
             if iteration > opt.add_tl_loss_from_iter:
-                previous_viewpoint_cam = viewpoint_stack[idx-1] if idx > 0 else viewpoint_stack[idx]
-                previous_render_pkg = render(previous_viewpoint_cam, gaussians, pipe, background, previous_viewpoint_cam.exposure_time)
-                previous_image_HDR = previous_render_pkg["image_HDR"]
-                previous_images_HDR.append(previous_image_HDR.unsqueeze(0))
-                previous_mask = previous_viewpoint_cam.mask.cuda()
-                previous_masks.append(previous_mask.unsqueeze(0))
-                next_viewpoint_cam = viewpoint_stack[idx+1] if idx < len(viewpoint_stack)-1 else viewpoint_stack[idx]
-                next_render_pkg = render(previous_viewpoint_cam, gaussians, pipe, background, previous_viewpoint_cam.exposure_time)
-                next_image_HDR = next_render_pkg["image_HDR"]
-                next_images_HDR.append(next_image_HDR.unsqueeze(0))
-                next_mask = next_viewpoint_cam.mask.cuda()
-                next_masks.append(next_mask.unsqueeze(0))
+                previous_viewpoint_cam = None
+                next_viewpoint_cam = None
+
+                if viewpoint_cam.optical_flow_to_prev is not None:
+                    previous_viewpoint_cam = viewpoint_stack[idx-1]
+
+                if viewpoint_cam.optical_flow_to_next is not None:
+                    next_viewpoint_cam = viewpoint_stack[idx+1]
+
+                if previous_viewpoint_cam is not None:
+                    prev_pkg = render(previous_viewpoint_cam, gaussians, pipe, background, previous_viewpoint_cam.exposure_time)
+                    previous_images_HDR.append(prev_pkg["image_HDR"].unsqueeze(0))
+                    previous_masks.append(previous_viewpoint_cam.mask.cuda().unsqueeze(0))
+
+                if next_viewpoint_cam is not None:
+                    next_pkg = render(next_viewpoint_cam, gaussians, pipe, background, next_viewpoint_cam.exposure_time)
+                    next_images_HDR.append(next_pkg["image_HDR"].unsqueeze(0))
+                    next_masks.append(next_viewpoint_cam.mask.cuda().unsqueeze(0))
 
         radii = torch.cat(radii_list,0).max(dim=0).values
         visibility_filter = torch.cat(visibility_filter_list).any(dim=0)
@@ -148,11 +154,11 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         gt_image_tensor = torch.cat(gt_images,0)
         gt_depth_tensor = torch.cat(gt_depths, 0)
         mask_tensor = torch.cat(masks, 0)
-        if iteration > opt.add_tl_loss_from_iter:
-            previous_images_HDR_tensor = torch.cat(previous_images_HDR, 0)
-            previous_mask_tensor = torch.cat(previous_masks, 0)
-            next_images_HDR_tensor = torch.cat(next_images_HDR, 0)
-            next_mask_tensor = torch.cat(next_masks, 0)
+        # if iteration > opt.add_tl_loss_from_iter:
+        #     previous_images_HDR_tensor = torch.cat(previous_images_HDR, 0)
+        #     previous_mask_tensor = torch.cat(previous_masks, 0)
+        #     next_images_HDR_tensor = torch.cat(next_images_HDR, 0)
+        #     next_mask_tensor = torch.cat(next_masks, 0)
         
         Ll1_ldr_from3d_loss = l1_loss(images_LDR_from3d_tensor, gt_image_tensor, mask_tensor)
         Ll1_ldr_from2d_loss = l1_loss(images_LDR_from2d_tensor, gt_image_tensor, mask_tensor)
@@ -175,8 +181,28 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
 
         tl_loss = torch.tensor(0, device="cuda")
         if iteration > opt.add_tl_loss_from_iter:
-            tl_loss = opt.lambda_tl * (temporal_luminance_loss(images_HDR_tensor, previous_images_HDR_tensor, mask_tensor | previous_mask_tensor) + temporal_luminance_loss(images_HDR_tensor, next_images_HDR_tensor, mask_tensor | next_mask_tensor))
-            loss = loss + tl_loss
+            losses = []
+
+            img_t = images_HDR_tensor            # [1,3,H,W]
+            mask_t = mask_tensor                 # [1,1,H,W] tissue
+
+            # prev
+            if (getattr(viewpoint_cam, "optical_flow_to_prev", None) is not None) and (previous_images_HDR[-1] is not None):
+                img_tm1 = previous_images_HDR[-1]              # [1,3,H,W]
+                mask_tm1 = previous_masks[-1]                  # [1,1,H,W]
+                flow_t2tm1 = viewpoint_cam.optical_flow_to_prev.to("cuda").unsqueeze(0)  # [1,2,H,W]
+                losses.append(temporal_luminance_loss(img_t, img_tm1, flow_t2tm1, mask_t, mask_tm1))
+
+            # next
+            if (getattr(viewpoint_cam, "optical_flow_to_next", None) is not None) and (next_images_HDR[-1] is not None):
+                img_tp1 = next_images_HDR[-1]
+                mask_tp1 = next_masks[-1]
+                flow_t2tp1 = viewpoint_cam.optical_flow_to_next.to("cuda").unsqueeze(0)
+                losses.append(temporal_luminance_loss(img_t, img_tp1, flow_t2tp1, mask_t, mask_tp1))
+
+            if len(losses) > 0:
+                tl_loss = opt.lambda_tl * (sum(losses) / len(losses))
+                loss = loss + tl_loss
 
         loss.backward()
 

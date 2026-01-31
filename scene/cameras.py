@@ -17,7 +17,7 @@ from utils.graphics_utils import getWorld2View2, getProjectionMatrix, getProject
 
     
 class Camera(nn.Module):
-    def __init__(self, colmap_id, R, T, FoVx, FoVy, image, normal_image, depth, mask, gt_alpha_mask, brightness,
+    def __init__(self, colmap_id, R, T, FoVx, FoVy, image, normal_image, depth, mask, gt_alpha_mask, brightness, optical_flow_to_next, optical_flow_to_prev,
                  image_name, uid,
                  trans=np.array([0.0, 0.0, 0.0]), scale=1.0, 
                  data_device = "cuda", time = 0, Znear=None, Zfar=None, 
@@ -81,6 +81,9 @@ class Camera(nn.Module):
             self.exposure_time = nn.Parameter(torch.tensor(1.0, device=self.data_device, dtype=torch.float))
         elif brightness == "high":
             self.exposure_time = nn.Parameter(torch.tensor(1.5, device=self.data_device, dtype=torch.float))
+
+        self.optical_flow_to_next = optical_flow_to_next
+        self.optical_flow_to_prev = optical_flow_to_prev
 
 class MiniCam:
     def __init__(self, width, height, fovy, fovx, znear, zfar, world_view_transform, full_proj_transform, time):
