@@ -105,7 +105,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         radii_list = []
         visibility_filter_list = []
         viewspace_point_tensor_list = []
-        
+
         for viewpoint_cam in viewpoint_cams:
             render_pkg = render(viewpoint_cam, gaussians, pipe, background, viewpoint_cam.exposure_time)
             image_LDR_from3d, image_LDR_from2d, image_HDR, depth, viewspace_point_tensor, visibility_filter, radii = \
@@ -113,6 +113,10 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
             gt_image = viewpoint_cam.original_image.cuda().float()
             gt_depth = viewpoint_cam.original_depth.cuda().float()
             mask = viewpoint_cam.mask.cuda()
+
+            depth_mask = torch.logical_and(gt_depth > 0, depth > 0)
+            gt_depth = gt_depth * depth_mask
+            depth = depth * depth_mask
             
             images_LDR_from3d.append(image_LDR_from3d.unsqueeze(0))
             images_LDR_from2d.append(image_LDR_from2d.unsqueeze(0))
@@ -168,8 +172,10 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         else:
             depth_tensor[depth_tensor!=0] = 1 / depth_tensor[depth_tensor!=0]
             gt_depth_tensor[gt_depth_tensor!=0] = 1 / gt_depth_tensor[gt_depth_tensor!=0]
-     
+    
             depth_loss = l1_loss(depth_tensor, gt_depth_tensor, mask_tensor)
+
+        # depth_loss = opt.lambda_depth * l1_loss(depth_tensor/(depth_tensor.max()+1e-6), gt_depth_tensor/(gt_depth_tensor.max()+1e-6), mask=mask_tensor)
 
         img_3d_tv_loss = opt.lambda_tv * TV_loss(images_LDR_from3d_tensor)
         img_2d_tv_loss = opt.lambda_tv * TV_loss(images_LDR_from2d_tensor)
@@ -179,30 +185,32 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         
         loss = Ll1_ldr_from3d_loss + Ll1_ldr_from2d_loss + depth_loss + img_3d_tv_loss + img_2d_tv_loss + depth_tv_loss + ue_loss
 
-        tl_loss = torch.tensor(0, device="cuda")
-        if iteration > opt.add_tl_loss_from_iter:
-            losses = []
+        # loss = Ll1_ldr_from2d_loss + depth_loss + img_2d_tv_loss + depth_tv_loss + ue_loss
 
-            img_t = images_HDR_tensor            # [1,3,H,W]
-            mask_t = mask_tensor                 # [1,1,H,W] tissue
+        # tl_loss = torch.tensor(0, device="cuda")
+        # if iteration > opt.add_tl_loss_from_iter:
+        #     losses = []
 
-            # prev
-            if (getattr(viewpoint_cam, "optical_flow_to_prev", None) is not None) and (previous_images_HDR[-1] is not None):
-                img_tm1 = previous_images_HDR[-1]              # [1,3,H,W]
-                mask_tm1 = previous_masks[-1]                  # [1,1,H,W]
-                flow_t2tm1 = viewpoint_cam.optical_flow_to_prev.to("cuda").unsqueeze(0)  # [1,2,H,W]
-                losses.append(temporal_luminance_loss(img_t, img_tm1, flow_t2tm1, mask_t, mask_tm1))
+        #     img_t = images_HDR_tensor            # [1,3,H,W]
+        #     mask_t = mask_tensor                 # [1,1,H,W] tissue
 
-            # next
-            if (getattr(viewpoint_cam, "optical_flow_to_next", None) is not None) and (next_images_HDR[-1] is not None):
-                img_tp1 = next_images_HDR[-1]
-                mask_tp1 = next_masks[-1]
-                flow_t2tp1 = viewpoint_cam.optical_flow_to_next.to("cuda").unsqueeze(0)
-                losses.append(temporal_luminance_loss(img_t, img_tp1, flow_t2tp1, mask_t, mask_tp1))
+        #     # prev
+        #     if (getattr(viewpoint_cam, "optical_flow_to_prev", None) is not None) and (previous_images_HDR[-1] is not None):
+        #         img_tm1 = previous_images_HDR[-1]              # [1,3,H,W]
+        #         mask_tm1 = previous_masks[-1]                  # [1,1,H,W]
+        #         flow_t2tm1 = viewpoint_cam.optical_flow_to_prev.to("cuda").unsqueeze(0)  # [1,2,H,W]
+        #         losses.append(temporal_luminance_loss(img_t, img_tm1, flow_t2tm1, mask_t, mask_tm1))
 
-            if len(losses) > 0:
-                tl_loss = opt.lambda_tl * (sum(losses) / len(losses))
-                loss = loss + tl_loss
+        #     # next
+        #     if (getattr(viewpoint_cam, "optical_flow_to_next", None) is not None) and (next_images_HDR[-1] is not None):
+        #         img_tp1 = next_images_HDR[-1]
+        #         mask_tp1 = next_masks[-1]
+        #         flow_t2tp1 = viewpoint_cam.optical_flow_to_next.to("cuda").unsqueeze(0)
+        #         losses.append(temporal_luminance_loss(img_t, img_tp1, flow_t2tp1, mask_t, mask_tp1))
+
+        #     if len(losses) > 0:
+        #         tl_loss = opt.lambda_tl * (sum(losses) / len(losses))
+                # loss = loss + tl_loss
 
         loss.backward()
 
@@ -220,14 +228,14 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
             total_point = gaussians._xyz.shape[0]
             if iteration % 10 == 0:
                 progress_bar.set_postfix({"Loss": f"{loss.item():.{4}f}",
-                                          "Loss 3D": f"{Ll1_ldr_from3d_loss.item():.{4}f}",
-                                          "Loss 2D": f"{Ll1_ldr_from2d_loss.item():.{4}f}",
-                                          "Depth Loss": f"{depth_loss.item():.{4}f}",
-                                          "TV Loss 3D": f"{img_3d_tv_loss.item():.{4}f}",
-                                          "TV Loss 2D": f"{img_2d_tv_loss.item():.{4}f}",
-                                          "TV Depth Loss": f"{depth_tv_loss.item():.{4}f}",
-                                          "UE Loss": f"{ue_loss.item():.{4}f}",
-                                          "TL Loss": f"{tl_loss.item():.{4}f}",
+                                          "3D": f"{Ll1_ldr_from3d_loss.item():.{4}f}",
+                                          "2D": f"{Ll1_ldr_from2d_loss.item():.{4}f}",
+                                          "Depth": f"{depth_loss.item():.{4}f}",
+                                          "TV 3D": f"{img_3d_tv_loss.item():.{4}f}",
+                                          "TV 2D": f"{img_2d_tv_loss.item():.{4}f}",
+                                          "TV Depth": f"{depth_tv_loss.item():.{4}f}",
+                                          "UE": f"{ue_loss.item():.{4}f}",
+                                        #   "TL": f"{tl_loss.item():.{4}f}",
                                           "PSNR 3D": f"{PSNR_3D:.{2}f}",
                                           "PSNR 2D": f"{PSNR_2D:.{2}f}",
                                           "Points": f"{total_point}"})
@@ -332,7 +340,7 @@ if __name__ == "__main__":
     parser.add_argument('--debug_from', type=int, default=-1)
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
     parser.add_argument("--test_iterations", nargs="+", type=int, default=[i*500 for i in range(0,120)])
-    parser.add_argument("--save_iterations", nargs="+", type=int, default=[7000])
+    parser.add_argument("--save_iterations", nargs="+", type=int, default=[3000,7000])
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--start_checkpoint", type=str, default = None)

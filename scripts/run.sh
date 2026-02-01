@@ -47,16 +47,16 @@ python train.py \
 
 echo "[2/3] Rendering..."
 python render.py \
-    --model_path "$MODEL_PATH"
+    --model_path "$MODEL_PATH" --skip_video --skip_train
 
 #########################
 # 3. EVALUATION
 #########################
 
 echo "[3/3] Evaluating..."
-python metrics.py \
-    --model_path "$MODEL_PATH"  \
-    -p train
+# python metrics.py \
+#     --model_path "$MODEL_PATH"  \
+#     -p train
 python metrics.py \
     --model_path "$MODEL_PATH"  \
     -p test

@@ -75,12 +75,18 @@ class Camera(nn.Module):
         self.full_proj_transform = (self.world_view_transform.unsqueeze(0).bmm(self.projection_matrix.unsqueeze(0))).squeeze(0)
         self.camera_center = self.world_view_transform.inverse()[3, :3]
 
+        # if brightness == "low":
+        #     self.exposure_time = nn.Parameter(torch.tensor(0.5, device=self.data_device, dtype=torch.float))
+        # elif brightness == "medium":
+        #     self.exposure_time = nn.Parameter(torch.tensor(1.0, device=self.data_device, dtype=torch.float))
+        # elif brightness == "high":
+        #     self.exposure_time = nn.Parameter(torch.tensor(1.5, device=self.data_device, dtype=torch.float))
         if brightness == "low":
-            self.exposure_time = nn.Parameter(torch.tensor(0.5, device=self.data_device, dtype=torch.float))
+            self.exposure_time = torch.tensor(0.5, device=self.data_device, dtype=torch.float)
         elif brightness == "medium":
-            self.exposure_time = nn.Parameter(torch.tensor(1.0, device=self.data_device, dtype=torch.float))
+            self.exposure_time = torch.tensor(1.0, device=self.data_device, dtype=torch.float)
         elif brightness == "high":
-            self.exposure_time = nn.Parameter(torch.tensor(1.5, device=self.data_device, dtype=torch.float))
+            self.exposure_time = torch.tensor(1.5, device=self.data_device, dtype=torch.float)
 
         self.optical_flow_to_next = optical_flow_to_next
         self.optical_flow_to_prev = optical_flow_to_prev

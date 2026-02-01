@@ -176,15 +176,15 @@ class EndoNeRF_Dataset(object):
         self.normal_image_paths = agg_png("normal_images")
         self.depth_paths = agg_png("depth")
         self.masks_paths = agg_png("masks")
-        self.optical_flow_to_next_paths = agg_npy("optical_flow_to_next")
-        self.optical_flow_to_prev_paths = agg_npy("optical_flow_to_prev")
+        # self.optical_flow_to_next_paths = agg_npy("optical_flow_to_next")
+        # self.optical_flow_to_prev_paths = agg_npy("optical_flow_to_prev")
 
         assert len(self.image_paths) == poses.shape[0], "the number of images should equal to the number of poses"
         assert len(self.normal_image_paths) == poses.shape[0], "the number of normal images should equal to the number of poses"
         assert len(self.depth_paths) == poses.shape[0], "the number of depth images should equal to number of poses"
         assert len(self.masks_paths) == poses.shape[0], "the number of masks should equal to the number of poses"
-        assert len(self.optical_flow_to_next_paths) == poses.shape[0] - 1, "the number of optical flow to next should equal to the number of poses - 1"
-        assert len(self.optical_flow_to_prev_paths) == poses.shape[0] - 1, "the number of optical flow to prev should equal to the number of poses - 1"
+        # assert len(self.optical_flow_to_next_paths) == poses.shape[0] - 1, "the number of optical flow to next should equal to the number of poses - 1"
+        # assert len(self.optical_flow_to_prev_paths) == poses.shape[0] - 1, "the number of optical flow to prev should equal to the number of poses - 1"
         
         self.brightness_map = {}
         brightness_path = os.path.join(self.root_dir, "brightness.json")
@@ -239,12 +239,12 @@ class EndoNeRF_Dataset(object):
             # optical flow
             optical_flow_to_next = None
             optical_flow_to_prev = None
-            if (idx + 1 < n_frames) and ((idx + 1) in train_set):
-                optical_flow_to_next_path = os.path.join(self.root_dir, "optical_flow_to_next", f"{idx:06d}.npy")
-                optical_flow_to_next = torch.from_numpy(np.load(optical_flow_to_next_path)).permute(2, 0, 1).float()
-            if (idx - 1 >= 0) and ((idx - 1) in train_set):
-                optical_flow_to_prev_path = os.path.join(self.root_dir, "optical_flow_to_prev", f"{idx:06d}.npy")
-                optical_flow_to_prev = torch.from_numpy(np.load(optical_flow_to_prev_path)).permute(2, 0, 1).float()
+            # if (idx + 1 < n_frames) and ((idx + 1) in train_set):
+            #     optical_flow_to_next_path = os.path.join(self.root_dir, "optical_flow_to_next", f"{idx:06d}.npy")
+            #     optical_flow_to_next = torch.from_numpy(np.load(optical_flow_to_next_path)).permute(2, 0, 1).float()
+            # if (idx - 1 >= 0) and ((idx - 1) in train_set):
+            #     optical_flow_to_prev_path = os.path.join(self.root_dir, "optical_flow_to_prev", f"{idx:06d}.npy")
+            #     optical_flow_to_prev = torch.from_numpy(np.load(optical_flow_to_prev_path)).permute(2, 0, 1).float()
 
             cameras.append(Camera(colmap_id=idx, R=R, T=T, FoVx=FovX, FoVy=FovY,image=image, normal_image=normal_image, depth=depth, mask=mask, gt_alpha_mask=None, brightness=brightness, optical_flow_to_next=optical_flow_to_next, optical_flow_to_prev=optical_flow_to_prev,
                           image_name=f"{idx}", uid=idx, data_device=torch.device("cuda"), time=time,
