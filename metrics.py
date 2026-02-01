@@ -188,11 +188,11 @@ def evaluate(model_paths):
                     ldr_from3d_render = ldr_from3d_render * mask
                     gt = gt * mask
 
-                    ldr_from2d_ssims.append(psnr(ldr_from2d_render, gt))
-                    ldr_from2d_psnrs.append(ssim(ldr_from2d_render, gt))
+                    ldr_from2d_ssims.append(ssim(ldr_from2d_render, gt))
+                    ldr_from2d_psnrs.append(psnr(ldr_from2d_render, gt))
                     ldr_from2d_lpipss.append(cal_lpips(ldr_from2d_render, gt))
-                    ldr_from3d_ssims.append(psnr(ldr_from3d_render, gt))
-                    ldr_from3d_psnrs.append(ssim(ldr_from3d_render, gt))
+                    ldr_from3d_ssims.append(ssim(ldr_from3d_render, gt))
+                    ldr_from3d_psnrs.append(psnr(ldr_from3d_render, gt))
                     ldr_from3d_lpipss.append(cal_lpips(ldr_from3d_render, gt))
 
                     if (depth_gt!=0).sum() < 10:
@@ -215,17 +215,17 @@ def evaluate(model_paths):
                 print("Scene: ", scene_dir,  "Depth map RMSE: {:>12.7f}".format(torch.tensor(rmses).mean(), ".5"))
                 print("")
 
-                full_dict[scene_dir][method].update({"Consistent LDR from 2D image SSIM": torch.tensor(consistent_ldr_from2d_ssims).mean().item(),
-                                                        "Consistent LDR from 2D image PSNR": torch.tensor(consistent_ldr_from2d_psnrs).mean().item(),
+                full_dict[scene_dir][method].update({"Consistent LDR from 2D image PSNR": torch.tensor(consistent_ldr_from2d_psnrs).mean().item(),
+                                                        "Consistent LDR from 2D image SSIM": torch.tensor(consistent_ldr_from2d_ssims).mean().item(),
                                                         "Consistent LDR from 2D image LPIPS": torch.tensor(consistent_ldr_from2d_lpipss).mean().item(),
-                                                        "Consistent LDR from 3D image SSIM": torch.tensor(consistent_ldr_from3d_ssims).mean().item(),
                                                         "Consistent LDR from 3D image PSNR": torch.tensor(consistent_ldr_from3d_psnrs).mean().item(),
+                                                        "Consistent LDR from 3D image SSIM": torch.tensor(consistent_ldr_from3d_ssims).mean().item(),
                                                         "Consistent LDR from 3D image LPIPS": torch.tensor(consistent_ldr_from3d_lpipss).mean().item()})
-                per_view_dict[scene_dir][method].update({"Consistent LDR from 2D image SSIMS": {name: ssim for ssim, name in zip(torch.tensor(consistent_ldr_from2d_ssims).tolist(), image_names)},
-                                                            "Consistent LDR from 2D image PSNRS": {name: psnr for psnr, name in zip(torch.tensor(consistent_ldr_from2d_psnrs).tolist(), image_names)},
+                per_view_dict[scene_dir][method].update({"Consistent LDR from 2D image PSNRS": {name: psnr for psnr, name in zip(torch.tensor(consistent_ldr_from2d_psnrs).tolist(), image_names)},
+                                                            "Consistent LDR from 2D image SSIMS": {name: ssim for ssim, name in zip(torch.tensor(consistent_ldr_from2d_ssims).tolist(), image_names)},
                                                             "Consistent LDR from 2D image LPIPSS": {name: lp for lp, name in zip(torch.tensor(consistent_ldr_from2d_lpipss).tolist(), image_names)},
-                                                            "Consistent LDR from 3D image SSIMS": {name: ssim for ssim, name in zip(torch.tensor(consistent_ldr_from3d_ssims).tolist(), image_names)},
                                                             "Consistent LDR from 3D image PSNRS": {name: psnr for psnr, name in zip(torch.tensor(consistent_ldr_from3d_psnrs).tolist(), image_names)},
+                                                            "Consistent LDR from 3D image SSIMS": {name: ssim for ssim, name in zip(torch.tensor(consistent_ldr_from3d_ssims).tolist(), image_names)},
                                                             "Consistent LDR from 3D image LPIPSS": {name: lp for lp, name in zip(torch.tensor(consistent_ldr_from3d_lpipss).tolist(), image_names)}})
                 
                 # if args.phase == "train":
