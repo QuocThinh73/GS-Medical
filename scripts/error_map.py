@@ -209,7 +209,7 @@ def process(folder_gt, folder_render, folder_mask, folder_out):
 
 
 if __name__ == "__main__":
-    root_dir = "output/exp14/endonerf-ec/pulling_soft_tissues/train/ours_7000/"
+    root_dir = "output/exp34/EndoNeRF-EC/pulling_soft_tissues/video/ours_7000/"
     process(
         os.path.join(root_dir, "gt"),
         os.path.join(root_dir, "ldr_from2d_renders"),
