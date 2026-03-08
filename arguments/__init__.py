@@ -135,6 +135,8 @@ class OptimizationParams(ParamGroup):
         self.lambda_norm_start = 1 #1000
         self.lambda_norm_skip = 1
         self.lambda_depth = 1.0
+        self.lambda_tv_image = 0.01
+        self.lambda_tv_depth = 0.01
         
         super().__init__(parser, "Optimization Parameters")
 

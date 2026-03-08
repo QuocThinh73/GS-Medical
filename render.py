@@ -25,9 +25,24 @@ from time import time
 import open3d as o3d
 from utils.graphics_utils import fov2focal
 import cv2
+from PIL import Image, ImageDraw
+import re
 
 
-to8b = lambda x : (255*np.clip(x.cpu().numpy(),0,1)).astype(np.uint8)
+def generate_video(imgs_path, text_to_add = ''):
+
+    image_files = [f for f in os.listdir(imgs_path) if re.match(r'\d+\.png$', f) and '_depth' not in f]
+    image_files_sorted = sorted(image_files, key=lambda x: int(re.findall(r'\d+', x)[0]))
+    writer = imageio.get_writer(f"{imgs_path}/0000_video.mp4", fps=20)
+    for img_name in image_files_sorted:
+        img_path = os.path.join(imgs_path, img_name)
+        img = Image.open(img_path)
+        # Draw text on the image
+        draw = ImageDraw.Draw(img)
+        draw.text(( img.width - 10 * len(text_to_add), 20), text_to_add, fill="green")  # Adjust position
+    
+        writer.append_data(np.array(img))
+    writer.close()
 
 def render_set(model_path, name, iteration, views, gaussians, pipeline, background,\
     no_fine, render_test=False, reconstruct=False, crop_size=0):
@@ -36,18 +51,21 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     gts_path = os.path.join(model_path, name, "ours_{}".format(iteration), "gt")
     gt_depth_path = os.path.join(model_path, name, "ours_{}".format(iteration), "gt_depth")
     masks_path = os.path.join(model_path, name, "ours_{}".format(iteration), "masks")
+    normals_path = os.path.join(model_path, name, "ours_{}".format(iteration), "normals")
 
     makedirs(render_path, exist_ok=True)
     makedirs(depth_path, exist_ok=True)
     makedirs(gts_path, exist_ok=True)
     makedirs(gt_depth_path, exist_ok=True)
     makedirs(masks_path, exist_ok=True)
+    makedirs(normals_path, exist_ok=True)
     
     render_images = []
     render_depths = []
     gt_list = []
     gt_depths = []
     mask_list = []
+    normals_list = []
 
     for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
         stage = 'coarse' if no_fine else 'fine'
@@ -61,7 +79,26 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
             mask_list.append(mask)
             gt_depth = view.original_depth
             gt_depths.append(gt_depth)
-    
+
+            # render normals
+            dir_pp_camera = gaussians.get_xyz - view.camera_center.to(gaussians.get_xyz.device).repeat(gaussians.get_features.shape[0], 1)
+            normal = gaussians.get_gaussian_normals()[:, 3:]
+
+            # # Normalize the input vectors
+            N = torch.nn.functional.normalize(normal, dim=1)
+            V = torch.nn.functional.normalize(dir_pp_camera, dim=1)
+
+            # # normals always towards camera
+            N_dot_V = torch.sum(N * -V, dim=1, keepdim=True)  # [N, 1]
+            N = torch.where(N_dot_V < 0, -N, N)  # Flip N if N_dot_V < 0
+            override_color = (N+1)/2
+            renderpkg = render(view, gaussians, pipeline, background, override_color = override_color)
+            rendering = renderpkg["render"].clamp(0,1)
+            torchvision.utils.save_image(rendering, os.path.join(normals_path, '{0:05d}'.format(idx) + ".png"))
+            normals_list.append(rendering)
+
+    generate_video(normals_path, "normals")
+
     if render_test:
         test_times = 20
         for i in range(test_times):
@@ -110,6 +147,13 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
             image = image.cpu().squeeze().numpy().astype(np.uint8)
             cv2.imwrite(os.path.join(gt_depth_path, '{0:05d}'.format(count) + ".png"), image)
             count += 1
+
+    count = 0
+    print("writing normals images.")
+    if len(normals_list) != 0:
+        for image in tqdm(normals_list):
+            torchvision.utils.save_image(image, os.path.join(normals_path, '{0:05d}'.format(count) + ".png"))
+            count +=1
             
     render_array = torch.stack(render_images, dim=0).permute(0, 2, 3, 1)
     render_array = (render_array*255).clip(0, 255).cpu().numpy().astype(np.uint8) # BxHxWxC

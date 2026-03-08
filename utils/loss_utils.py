@@ -88,10 +88,10 @@ def lpips_loss(img1, img2, lpips_model):
     return loss.mean()
 
 def TV_loss(x):
-    B, C, H, W = x.shape
-    tv_h = torch.abs(x[:,:,1:,:] - x[:,:,:-1,:]).sum()
-    tv_w = torch.abs(x[:,:,:,1:] - x[:,:,:,:-1]).sum()
-    return (tv_h + tv_w) / (B * C * H * W)
+    C, H, W = x.shape
+    tv_h = torch.abs(x[:, 1:, :] - x[:, :-1, :]).sum()
+    tv_w = torch.abs(x[:, :, 1:] - x[:, :, :-1]).sum()
+    return (tv_h + tv_w) / (C * H * W)
     
 def compute_geometric_loss(gaussian_normals, original_normals, closest_point_indices):
     """    

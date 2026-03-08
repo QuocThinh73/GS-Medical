@@ -165,8 +165,8 @@ class EndoNeRF_Dataset(object):
         
         # get paths of images, depths, masks, etc.
         agg_fn = lambda filetype: sorted(glob.glob(os.path.join(self.root_dir, filetype, "*.png")))
-        # self.image_paths = agg_fn("images")
-        self.image_paths = agg_fn("final_inpaint")
+        self.image_paths = agg_fn("images")
+        # self.image_paths = agg_fn("final_inpaint")
         self.depth_paths = agg_fn("depth")
         self.masks_paths = agg_fn("masks")
 

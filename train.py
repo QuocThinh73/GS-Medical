@@ -13,7 +13,7 @@ import random
 import os 
 import torch
 from random import randint
-from utils.loss_utils import l1_loss, ssim, compute_geometric_loss
+from utils.loss_utils import TV_loss, l1_loss, ssim, compute_geometric_loss
 from gaussian_renderer import render_flow as render
 from gaussian_renderer import network_gui
 
@@ -156,6 +156,14 @@ def training(dataset, hyper, opt, pipe, args):
             L_normals = compute_geometric_loss(gaussian_normals, original_normals, closest_point_indices)
             loss += opt.lambda_norm * L_normals
 
+        if opt.lambda_tv_image != 0:
+            L_tv_image = TV_loss(image)
+            loss += opt.lambda_tv_image * L_tv_image
+
+        if opt.lambda_tv_depth != 0:
+            L_tv_depth = TV_loss(depth)
+            loss += opt.lambda_tv_depth * L_tv_depth
+
         sys_exit = False
         if loss.isnan():
             print('nan')
@@ -208,6 +216,9 @@ def training(dataset, hyper, opt, pipe, args):
             if (iteration in args.save_iterations):
                 print("\n[ITER {}] Saving Gaussians".format(iteration))
                 scene.save(iteration, 'fine')
+
+            if (iteration in args.test_iterations):
+                print(f"[ITER {iteration}] Total Loss: {loss.item():.{7}f}, PSNR: {psnr_:.{2}f}, L1 Loss: {((1.0 - opt.lambda_dssim) * L1_images).item():.{7}f}, L_dssim: {(opt.lambda_dssim * L_dssim).item() if opt.lambda_dssim != 0 else 0:.{7}f}, L_depth: {(opt.lambda_depth * L_depth).item() if opt.lambda_depth != 0 else 0:.{7}f}, L_normals: {(opt.lambda_norm * L_normals).item() if opt.lambda_norm != 0 and iteration > opt.lambda_norm_start and iteration % opt.lambda_norm_skip == 0 else 0:.{7}f}, L_tv_image: {(opt.lambda_tv_image * L_tv_image).item() if opt.lambda_tv_image != 0 else 0:.{7}f}, L_tv_depth: {(opt.lambda_tv_depth * L_tv_depth).item() if opt.lambda_tv_depth != 0 else 0:.{7}f}")
 
             if sys_exit:
                 sys.exit()
