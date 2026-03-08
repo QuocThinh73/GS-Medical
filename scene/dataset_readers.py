@@ -20,7 +20,7 @@ import torch
 import json
 from pathlib import Path
 from plyfile import PlyData, PlyElement
-from scene.flexible_deform_model import BasicPointCloud
+from scene.gaussian_model import BasicPointCloud
 from utils.general_utils import PILtoTorch
 from tqdm import tqdm
 

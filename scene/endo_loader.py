@@ -25,8 +25,6 @@ import torch.nn.functional as F
 from utils.general_utils import inpaint_depth, inpaint_rgb
 
 def generate_se3_matrix(translation, rotation_rad):
-
-
     # Create rotation matrices around x, y, and z axes
     Rx = np.array([[1, 0, 0],
                    [0, np.cos(rotation_rad[0]), -np.sin(rotation_rad[0])],
@@ -61,6 +59,7 @@ def update_extr(c2w, rotation_deg, radii_mm):
         
         return np.linalg.inv(extr) # c2w
     
+
 class CameraInfo(NamedTuple):
     uid: int
     R: np.array
@@ -81,11 +80,6 @@ class CameraInfo(NamedTuple):
 def normalize(v):
     """Normalize a vector."""
     return v / np.linalg.norm(v)
-
-
-
-
-
 
 
 class EndoNeRF_Dataset(object):

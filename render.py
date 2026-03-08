@@ -20,7 +20,7 @@ import torchvision
 from utils.general_utils import safe_state
 from argparse import ArgumentParser
 from arguments import ModelParams, PipelineParams, get_combined_args, FDMHiddenParams
-from scene.flexible_deform_model import GaussianModel
+from scene.gaussian_model import GaussianModel
 from time import time
 import open3d as o3d
 from utils.graphics_utils import fov2focal

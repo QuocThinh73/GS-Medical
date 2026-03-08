@@ -7,18 +7,19 @@
 # under the terms of the LICENSE.md file.
 # For inquiries contact  george.drettakis@inria.fr
 #
+import json
 import numpy as np
 import random
 import os 
 import torch
 from random import randint
-from utils.loss_utils import l1_loss
+from utils.loss_utils import l1_loss, compute_geometric_loss
 from gaussian_renderer import render_flow as render
 
 import time
 import sys
 from scene import  Scene
-from scene.flexible_deform_model import GaussianModel
+from scene.gaussian_model import GaussianModel
 from utils.general_utils import safe_state
 from tqdm import tqdm
 from utils.image_utils import psnr
@@ -51,6 +52,10 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
     bg_color = [1, 1, 1] if dataset.white_background else [0, 0, 0]
     background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
 
+    # initialize normals for geometric loss if weight is not 0
+    if opt.lambda_norm != 0:
+        original_normals = gaussians.get_original_normals.detach()
+
     # iter_start = torch.cuda.Event(enable_timing = True)
     # iter_end = torch.cuda.Event(enable_timing = True)
 
@@ -67,6 +72,10 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
     if not viewpoint_stack:
         viewpoint_stack = scene.getTrainCameras()
         
+    # -----------------------------------------------------------
+    # Training loop
+    # -----------------------------------------------------------
+
     for iteration in range(first_iter, final_iter+1):        
 
         t_start = time.time()
@@ -118,7 +127,11 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         gt_depth_tensor = torch.cat(gt_depths, 0)
         mask_tensor = torch.cat(masks, 0)
         
-        Ll1 = l1_loss(image_tensor, gt_image_tensor, mask_tensor)
+        # -----------------------------------------------------------
+        # Loss computation
+        # -----------------------------------------------------------
+
+        L1_images = l1_loss(image_tensor, gt_image_tensor, mask_tensor)
         
         if (gt_depth_tensor!=0).sum() < 10:
             depth_loss = torch.tensor(0.).cuda()
@@ -127,11 +140,16 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
             gt_depth_tensor[gt_depth_tensor!=0] = 1 / gt_depth_tensor[gt_depth_tensor!=0]
      
             depth_loss = l1_loss(depth_tensor, gt_depth_tensor, mask_tensor)
-        
       
-        psnr_ = psnr(image_tensor, gt_image_tensor, mask_tensor).mean().double()        
-        loss = Ll1 + depth_loss 
-        
+        psnr_ = psnr(image_tensor, gt_image_tensor, mask_tensor).mean().double()      
+        loss = L1_images + depth_loss
+
+        if opt.lambda_norm != 0 and iteration > opt.lambda_norm_start and iteration % opt.lambda_norm_skip == 0:
+            gaussian_normals = gaussians.get_gaussian_normals()
+            closest_point_indices = gaussians.get_closest_point_indices
+            L_normals = compute_geometric_loss(gaussian_normals, original_normals, closest_point_indices)
+            loss += opt.lambda_norm * L_normals
+
         loss.backward()
         viewspace_point_tensor_grad = torch.zeros_like(viewspace_point_tensor)
         for idx in range(0, len(viewspace_point_tensor_list)):
@@ -139,6 +157,10 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         # iter_end.record()
         torch.cuda.synchronize()
         iter_time = time.time() - t_start
+
+        # -----------------------------------------------------------
+        # Training report
+        # -----------------------------------------------------------
 
         with torch.no_grad():
             # Progress bar
@@ -152,14 +174,28 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
                 progress_bar.close()
 
             # Log and save
-            timer.pause()
-            # training_report(tb_writer, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, [pipe, background])
-            training_report(tb_writer, iteration, Ll1, loss, loss, iter_time, testing_iterations, scene, render, [pipe, background])
+            report_params = {
+                "tb_writer": tb_writer,
+                "iteration": iteration,
+                "Ll1": L1_images,
+                "loss": loss,
+                "l1_loss": l1_loss,
+                "elapsed": iter_time,
+                "testing_iterations": testing_iterations,
+                "scene": scene,
+                "renderFunc": render,
+                "renderArgs": [pipe, background]
+            }
+            training_report(**report_params)
+
             if (iteration in saving_iterations):
                 print("\n[ITER {}] Saving Gaussians".format(iteration))
                 scene.save(iteration, 'fine')
-            timer.start()
             
+            # -----------------------------------------------------------
+            # Adding Gaussian points 
+            # -----------------------------------------------------------
+
             # Densification
             if iteration < opt.densify_until_iter :
                 # Keep track of max radii in image-space for pruning
@@ -182,7 +218,10 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
                     print("reset opacity")
                     gaussians.reset_opacity()
                     
-            # Optimizer step
+            # -----------------------------------------------------------
+            # Optimization step
+            # -----------------------------------------------------------
+
             if iteration < opt.iterations:
                 gaussians.optimizer.step()
                 gaussians.optimizer.zero_grad(set_to_none = True)
@@ -196,7 +235,7 @@ def training(dataset, hyper, opt, pipe, testing_iterations, saving_iterations, c
     gaussians = GaussianModel(dataset.sh_degree, hyper)
     dataset.model_path = args.model_path
     timer = Timer()
-    scene = Scene(dataset, gaussians)
+    scene = Scene(dataset, gaussians, init_train_args=opt)
     timer.start()
     scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_iterations,
                          checkpoint_iterations, checkpoint, debug_from,
@@ -218,13 +257,12 @@ def prepare_output_and_logger(expname):
     return tb_writer
 
 def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_iterations, scene : Scene, renderFunc, renderArgs):
-    
     if tb_writer:
+        # log basic metrics
         tb_writer.add_scalar(f'train_loss_patches/l1_loss', Ll1.item(), iteration)
-        tb_writer.add_scalar(f'train_loss_patchestotal_loss', loss.item(), iteration)
+        tb_writer.add_scalar(f'train_loss_patches/total_loss', loss.item(), iteration)
         tb_writer.add_scalar(f'iter_time', elapsed, iteration)
     
-
 
 def setup_seed(seed):
      torch.manual_seed(seed)

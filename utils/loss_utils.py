@@ -89,4 +89,20 @@ def _ssim(img1, img2, window, window_size, channel, size_average=True):
         return ssim_map.mean()
     else:
         return ssim_map.mean(1).mean(1).mean(1)
+    
+def compute_geometric_loss(gaussian_normals, original_normals, closest_point_indices):
+    """    
+    Compute the geometric loss between gaussian normals and original normals.
 
+    Args:
+        gaussian_normals: Tensor of shape (N, 6) representing gaussian normals.
+        original_normals: Tensor of shape (M, 6) representing original normals.
+        closest_point_indices: Tensor of shape (N, 1) representing the indices of the closest points in the original point cloud.
+
+    Returns: 
+        The computed L1 loss.
+    """
+    closest_original_normals = original_normals[closest_point_indices, 3:]
+    cosine_sim = (gaussian_normals[:, 3:] * closest_original_normals).sum(dim=1)
+    loss = 1 - cosine_sim.abs()
+    return loss.mean()

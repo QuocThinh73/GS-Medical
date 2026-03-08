@@ -14,7 +14,7 @@ import random
 import json
 from utils.system_utils import searchForMaxIteration
 from scene.dataset_readers import sceneLoadTypeCallbacks
-from scene.flexible_deform_model import GaussianModel
+from scene.gaussian_model import GaussianModel
 from arguments import ModelParams
 from utils.camera_utils import cameraList_from_camInfos, camera_to_JSON
 from torch.utils.data import Dataset
@@ -23,7 +23,7 @@ class Scene:
 
     gaussians : GaussianModel
     
-    def __init__(self, args : ModelParams, gaussians : GaussianModel, load_iteration=None):
+    def __init__(self, args : ModelParams, gaussians : GaussianModel, load_iteration=None, init_train_args=None):
         """b
         :param path: Path to colmap scene main folder.
         """
@@ -73,7 +73,8 @@ class Scene:
                                                     "iteration_" + str(self.loaded_iter),
                                                    ))
         else:
-            self.gaussians.create_from_pcd(scene_info.point_cloud, args.camera_extent, self.maxtime)
+            print("Creating scene from point cloud")
+            self.gaussians.create_from_pcd(scene_info.point_cloud, args.camera_extent, self.maxtime, init_args=init_train_args)
 
     def save(self, iteration, stage):
         if stage == "coarse":

@@ -12,7 +12,7 @@
 import torch
 import math
 from diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianRasterizer
-from scene.flexible_deform_model import GaussianModel
+from scene.gaussian_model import GaussianModel
 from utils.sh_utils import eval_sh
 
 def render_flow(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, override_color = None):
@@ -51,13 +51,11 @@ def render_flow(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Ten
 
     rasterizer = GaussianRasterizer(raster_settings=raster_settings)
 
-    # means3D = pc.get_xyz
-    # add deformation to each points
-    # deformation = pc.get_deformation
     means3D = pc.get_xyz
-    ori_time = torch.tensor(viewpoint_camera.time).to(means3D.device)
     means2D = screenspace_points
     opacity = pc._opacity
+
+    ori_time = torch.tensor(viewpoint_camera.time).to(means3D.device)
 
     # If precomputed 3d covariance is provided, use it. If not, then it will be computed from
     # scaling / rotation by the rasterizer.
@@ -72,7 +70,6 @@ def render_flow(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Ten
         rotations = pc._rotation
     deformation_point = pc._deformation_table
     
-
     means3D_deform, scales_deform, rotations_deform = pc.deformation(means3D[deformation_point], scales[deformation_point], 
                                                                          rotations[deformation_point],
                                                                          ori_time)
