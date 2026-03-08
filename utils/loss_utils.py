@@ -15,38 +15,23 @@ from torch.autograd import Variable
 from math import exp
 
 
-def TV_loss(x, mask):
-    B, C, H, W = x.shape
-    tv_h = torch.abs(x[:,:,1:,:] - x[:,:,:-1,:]).sum()
-    tv_w = torch.abs(x[:,:,:,1:] - x[:,:,:,:-1]).sum()
-    return (tv_h + tv_w) / (B * C * H * W)
-
-
-def lpips_loss(img1, img2, lpips_model):
-    loss = lpips_model(img1,img2)
-    return loss.mean()
-
 def l1_loss(network_output, gt, mask=None):
     loss = torch.abs((network_output - gt))
     if mask is not None:
-        if mask.ndim == 4:
-            mask = mask.repeat(1, network_output.shape[1], 1, 1)
-        elif mask.ndim == 3:
-            mask = mask.repeat(network_output.shape[1], 1, 1)
-        else:
-            raise ValueError('the dimension of mask should be either 3 or 4')
-    
-        try:
-            loss = loss[mask!=0]
-        except:
-            print(loss.shape)
-            print(mask.shape)
-            print(loss.dtype)
-            print(mask.dtype)
+        mask = mask.repeat(network_output.shape[0], 1, 1)
+        loss = loss[mask!=0]
+
     return loss.mean()
 
-def l2_loss(network_output, gt):
-    return ((network_output - gt) ** 2).mean()
+def l2_loss(network_output, gt, mask=None):
+    loss = ((network_output - gt) ** 2)
+
+    if mask is not None:
+        mask = mask.repeat(network_output.shape[0], 1, 1)
+        loss = loss[mask!=0]
+
+    return loss.mean()
+
 
 def gaussian(window_size, sigma):
     gauss = torch.Tensor([exp(-(x - window_size // 2) ** 2 / float(2 * sigma ** 2)) for x in range(window_size)])
@@ -58,7 +43,9 @@ def create_window(window_size, channel):
     window = Variable(_2D_window.expand(channel, 1, window_size, window_size).contiguous())
     return window
 
-def ssim(img1, img2, window_size=11, size_average=True):
+def ssim(img1, img2, window_size=11, size_average=True, mask=None):
+    img2 = img2.to(img1.dtype)
+
     channel = img1.size(-3)
     window = create_window(window_size, channel)
 
@@ -66,9 +53,9 @@ def ssim(img1, img2, window_size=11, size_average=True):
         window = window.cuda(img1.get_device())
     window = window.type_as(img1)
 
-    return _ssim(img1, img2, window, window_size, channel, size_average)
+    return _ssim(img1, img2, window, window_size, channel, size_average, mask)
 
-def _ssim(img1, img2, window, window_size, channel, size_average=True):
+def _ssim(img1, img2, window, window_size, channel, size_average=True, mask=None, eps=1e-8):
     mu1 = F.conv2d(img1, window, padding=window_size // 2, groups=channel)
     mu2 = F.conv2d(img2, window, padding=window_size // 2, groups=channel)
 
@@ -85,10 +72,26 @@ def _ssim(img1, img2, window, window_size, channel, size_average=True):
 
     ssim_map = ((2 * mu1_mu2 + C1) * (2 * sigma12 + C2)) / ((mu1_sq + mu2_sq + C1) * (sigma1_sq + sigma2_sq + C2))
 
+    if mask is not None:
+        mask = mask.to(ssim_map.dtype)
+        mask = mask.expand_as(ssim_map)
+
+        return (ssim_map * mask).sum() / mask.sum().clamp_min(eps)
+
     if size_average:
         return ssim_map.mean()
     else:
         return ssim_map.mean(1).mean(1).mean(1)
+
+def lpips_loss(img1, img2, lpips_model):
+    loss = lpips_model(img1,img2)
+    return loss.mean()
+
+def TV_loss(x):
+    B, C, H, W = x.shape
+    tv_h = torch.abs(x[:,:,1:,:] - x[:,:,:-1,:]).sum()
+    tv_w = torch.abs(x[:,:,:,1:] - x[:,:,:,:-1]).sum()
+    return (tv_h + tv_w) / (B * C * H * W)
     
 def compute_geometric_loss(gaussian_normals, original_normals, closest_point_indices):
     """    
