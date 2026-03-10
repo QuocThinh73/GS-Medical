@@ -7,14 +7,10 @@
 # under the terms of the LICENSE.md file.
 # For inquiries contact  george.drettakis@inria.fr
 #
-import json
-import numpy as np
-import random
-import os 
 import torch
 from random import randint
 from utils.loss_utils import TV_loss, l1_loss, ssim
-from gaussian_renderer import render_flow as render
+from gaussian_renderer import render
 from gaussian_renderer import network_gui
 
 import time
@@ -24,14 +20,10 @@ from scene.gaussian_model import GaussianModel
 from utils.general_utils import safe_state
 from tqdm import tqdm
 from utils.image_utils import psnr
-from argparse import ArgumentParser, Namespace
+from argparse import ArgumentParser
 from arguments import ModelParams, PipelineParams, OptimizationParams
 from arguments import FDMHiddenParams as ModelHiddenParams
-from utils.timer import Timer
-import torch.nn.functional as F
 from utils.train_utils import prepare_output_and_logger, training_report, setup_seed, save_example_images
-# import lpips
-from utils.scene_utils import render_training_image
 
 
 def training(dataset, hyper, opt, pipe, args):
@@ -39,7 +31,7 @@ def training(dataset, hyper, opt, pipe, args):
     Executes the training loop for the specified dataset and model parameters.
 
     Parameters:
-        dataset (object): The dataset to be used for training.
+        dataset (object): The dataset to be used for training.s
         hyper (object): Hyperparameters for flexible deformation modeling.
         opt (object): Optimization parameters.
         pipe (object): Pipeline parameters.
