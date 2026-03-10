@@ -13,7 +13,7 @@ import random
 import os 
 import torch
 from random import randint
-from utils.loss_utils import TV_loss, l1_loss, ssim, compute_geometric_loss
+from utils.loss_utils import TV_loss, l1_loss, ssim
 from gaussian_renderer import render_flow as render
 from gaussian_renderer import network_gui
 
@@ -66,10 +66,6 @@ def training(dataset, hyper, opt, pipe, args):
     # set background color
     bg_color = [1, 1, 1] if dataset.white_background else [0, 0, 0]
     background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
-
-    # initialize normals for geometric loss if weight is not 0
-    if opt.lambda_norm != 0:
-        original_normals = gaussians.get_original_normals.detach()
 
     # iter_start = torch.cuda.Event(enable_timing = True)
     # iter_end = torch.cuda.Event(enable_timing = True)
@@ -150,12 +146,6 @@ def training(dataset, hyper, opt, pipe, args):
             L_dssim = 1.0 - ssim(image, gt_image, mask=mask)
             loss += opt.lambda_dssim * L_dssim
 
-        if opt.lambda_norm != 0 and iteration > opt.lambda_norm_start and iteration % opt.lambda_norm_skip == 0:
-            gaussian_normals = gaussians.get_gaussian_normals()
-            closest_point_indices = gaussians.get_closest_point_indices
-            L_normals = compute_geometric_loss(gaussian_normals, original_normals, closest_point_indices)
-            loss += opt.lambda_norm * L_normals
-
         if opt.lambda_tv_image != 0:
             L_tv_image = TV_loss(image)
             loss += opt.lambda_tv_image * L_tv_image
@@ -218,7 +208,7 @@ def training(dataset, hyper, opt, pipe, args):
                 scene.save(iteration, 'fine')
 
             if (iteration in args.test_iterations):
-                print(f"[ITER {iteration}] Total Loss: {loss.item():.{7}f}, PSNR: {psnr_:.{2}f}, L1 Loss: {((1.0 - opt.lambda_dssim) * L1_images).item():.{7}f}, L_dssim: {(opt.lambda_dssim * L_dssim).item() if opt.lambda_dssim != 0 else 0:.{7}f}, L_depth: {(opt.lambda_depth * L_depth).item() if opt.lambda_depth != 0 else 0:.{7}f}, L_normals: {(opt.lambda_norm * L_normals).item() if opt.lambda_norm != 0 and iteration > opt.lambda_norm_start and iteration % opt.lambda_norm_skip == 0 else 0:.{7}f}, L_tv_image: {(opt.lambda_tv_image * L_tv_image).item() if opt.lambda_tv_image != 0 else 0:.{7}f}, L_tv_depth: {(opt.lambda_tv_depth * L_tv_depth).item() if opt.lambda_tv_depth != 0 else 0:.{7}f}")
+                print(f"[ITER {iteration}] Total Loss: {loss.item():.{7}f}, PSNR: {psnr_:.{2}f}, L1 Loss: {((1.0 - opt.lambda_dssim) * L1_images).item():.{7}f}, L_dssim: {(opt.lambda_dssim * L_dssim).item() if opt.lambda_dssim != 0 else 0:.{7}f}, L_depth: {(opt.lambda_depth * L_depth).item() if opt.lambda_depth != 0 else 0:.{7}f}, L_tv_image: {(opt.lambda_tv_image * L_tv_image).item() if opt.lambda_tv_image != 0 else 0:.{7}f}, L_tv_depth: {(opt.lambda_tv_depth * L_tv_depth).item() if opt.lambda_tv_depth != 0 else 0:.{7}f}")
 
             if sys_exit:
                 sys.exit()
@@ -233,7 +223,6 @@ def training(dataset, hyper, opt, pipe, args):
                 gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
                 gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
 
-  
                 opacity_threshold = opt.opacity_threshold_fine_init - iteration*(opt.opacity_threshold_fine_init - opt.opacity_threshold_fine_after)/(opt.densify_until_iter)  
                 densify_threshold = opt.densify_grad_threshold_fine_init - iteration*(opt.densify_grad_threshold_fine_init - opt.densify_grad_threshold_after)/(opt.densify_until_iter )  
 

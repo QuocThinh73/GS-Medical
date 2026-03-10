@@ -65,7 +65,6 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     gt_list = []
     gt_depths = []
     mask_list = []
-    normals_list = []
 
     for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
         stage = 'coarse' if no_fine else 'fine'
@@ -79,25 +78,6 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
             mask_list.append(mask)
             gt_depth = view.original_depth
             gt_depths.append(gt_depth)
-
-            # render normals
-            dir_pp_camera = gaussians.get_xyz - view.camera_center.to(gaussians.get_xyz.device).repeat(gaussians.get_features.shape[0], 1)
-            normal = gaussians.get_gaussian_normals()[:, 3:]
-
-            # # Normalize the input vectors
-            N = torch.nn.functional.normalize(normal, dim=1)
-            V = torch.nn.functional.normalize(dir_pp_camera, dim=1)
-
-            # # normals always towards camera
-            N_dot_V = torch.sum(N * -V, dim=1, keepdim=True)  # [N, 1]
-            N = torch.where(N_dot_V < 0, -N, N)  # Flip N if N_dot_V < 0
-            override_color = (N+1)/2
-            renderpkg = render(view, gaussians, pipeline, background, override_color = override_color)
-            rendering = renderpkg["render"].clamp(0,1)
-            torchvision.utils.save_image(rendering, os.path.join(normals_path, '{0:05d}'.format(idx) + ".png"))
-            normals_list.append(rendering)
-
-    generate_video(normals_path, "normals")
 
     if render_test:
         test_times = 20
@@ -147,27 +127,15 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
             image = image.cpu().squeeze().numpy().astype(np.uint8)
             cv2.imwrite(os.path.join(gt_depth_path, '{0:05d}'.format(count) + ".png"), image)
             count += 1
-
-    count = 0
-    print("writing normals images.")
-    if len(normals_list) != 0:
-        for image in tqdm(normals_list):
-            torchvision.utils.save_image(image, os.path.join(normals_path, '{0:05d}'.format(count) + ".png"))
-            count +=1
             
     render_array = torch.stack(render_images, dim=0).permute(0, 2, 3, 1)
     render_array = (render_array*255).clip(0, 255).cpu().numpy().astype(np.uint8) # BxHxWxC
     imageio.mimwrite(os.path.join(model_path, name, "ours_{}".format(iteration), 'ours_video.mp4'), render_array, fps=30, quality=8)
-    
-    gt_array = torch.stack(gt_list, dim=0).permute(0, 2, 3, 1)
-    gt_array = (gt_array*255).clip(0, 255).cpu().numpy().astype(np.uint8)
-    imageio.mimwrite(os.path.join(model_path, name, "ours_{}".format(iteration), 'gt_video.mp4'), gt_array, fps=30, quality=8)
                     
     FoVy, FoVx, height, width = view.FoVy, view.FoVx, view.image_height, view.image_width
     focal_y, focal_x = fov2focal(FoVy, height), fov2focal(FoVx, width)
     camera_parameters = (focal_x, focal_y, width, height)
     
-
     if reconstruct:
         print('file name:', name)
         reconstruct_point_cloud(render_images, mask_list, render_depths, camera_parameters, name, model_path, crop_size)

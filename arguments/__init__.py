@@ -126,14 +126,8 @@ class OptimizationParams(ParamGroup):
         self.opacity_threshold_fine_init = 0.005
         self.opacity_threshold_fine_after = 0.005
 
-        # values to initialize light object
-        self.K_normals = 100
-
         # losses params
         self.lambda_dssim = 0.2
-        self.lambda_norm = 0.5
-        self.lambda_norm_start = 1 #1000
-        self.lambda_norm_skip = 1
         self.lambda_depth = 1.0
         self.lambda_tv_image = 0.01
         self.lambda_tv_depth = 0.01
