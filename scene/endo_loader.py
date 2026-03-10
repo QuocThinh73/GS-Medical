@@ -166,14 +166,17 @@ class EndoNeRF_Dataset(object):
         # get paths of images, depths, masks, etc.
         agg_fn = lambda filetype: sorted(glob.glob(os.path.join(self.root_dir, filetype, "*.png")))
         self.image_paths = agg_fn("images")
-        # self.image_paths = agg_fn("final_inpaint")
-        self.depth_paths = agg_fn("depth")
+        self.inpaint_image_paths = agg_fn("inpaint_images")
+        self.depth_paths = agg_fn("dam_depths")
         self.masks_paths = agg_fn("masks")
+        self.specular_mask_paths = agg_fn("specular_masks")
 
         assert len(self.image_paths) == poses.shape[0], "the number of images should equal to the number of poses"
+        assert len(self.inpaint_image_paths) == poses.shape[0], "the number of inpaint images should equal to the number of poses"
         assert len(self.depth_paths) == poses.shape[0], "the number of depth images should equal to number of poses"
         assert len(self.masks_paths) == poses.shape[0], "the number of masks should equal to the number of poses"
-        
+        assert len(self.specular_mask_paths) == poses.shape[0], "the number of specular masks should equal to the number of poses"
+
     def format_infos(self, split):
         cameras = []
         
@@ -183,34 +186,51 @@ class EndoNeRF_Dataset(object):
             idxs = self.video_idxs
         
         for idx in tqdm(idxs):
-            # mask / depth
+            # mask
             mask_path = self.masks_paths[idx]
             mask = Image.open(mask_path)
-            # StereoMIS 
+            ## StereoMIS 
             if 'stereomis' in self.root_dir.lower():
                 mask = np.array(mask)
                 if len(mask.shape) > 2:
                     mask = (mask[..., 0]>0).astype(np.uint8)
             else:
                 mask = 1 - np.array(mask) / 255.0
+            mask = self.transform(mask).bool()
+
+            # specular mask
+            specular_mask_path = self.specular_mask_paths[idx]
+            specular_mask = Image.open(specular_mask_path)
+            specular_mask = 1 - np.array(specular_mask) / 255.0
+            specular_mask = self.transform(specular_mask).bool()
+
+            # depth
             depth_path = self.depth_paths[idx]
             depth = np.array(Image.open(depth_path))
             close_depth = np.percentile(depth[depth!=0], 3.0)
             inf_depth = np.percentile(depth[depth!=0], 99.8)
             depth = np.clip(depth, close_depth, inf_depth) 
             depth = torch.from_numpy(depth)
-            mask = self.transform(mask).bool()
+            
             # color
             color = np.array(Image.open(self.image_paths[idx]))/255.0
             image = self.transform(color)
+
+            # inpaint color
+            inpaint_color = np.array(Image.open(self.inpaint_image_paths[idx]))/255.0
+            inpaint_image = self.transform(inpaint_color)
+
             # times           
             time = self.image_times[idx]
+
             # poses
             R, T = self.image_poses[idx]
+
             # fov
             FovX = focal2fov(self.focal[0], self.img_wh[0])
             FovY = focal2fov(self.focal[1], self.img_wh[1])
-            cameras.append(Camera(colmap_id=idx, R=R, T=T, FoVx=FovX, FoVy=FovY,image=image, depth=depth, mask=mask, gt_alpha_mask=None,
+
+            cameras.append(Camera(colmap_id=idx, R=R, T=T, FoVx=FovX, FoVy=FovY, image=image, inpaint_image=inpaint_image, depth=depth, mask=mask, specular_mask=specular_mask, gt_alpha_mask=None,
                           image_name=f"{idx}", uid=idx, data_device=torch.device("cuda"), time=time,
                           Znear=None, Zfar=None, K=self.K, h=self.img_wh[1], w=self.img_wh[0]))
         return cameras
