@@ -37,9 +37,9 @@ echo "======================================"
 #########################
 
 echo "[1/3] Training..."
-# python train.py \
-#     -s "$DATA_PATH" \
-#     --expname "$EXP_NAME"
+python train.py \
+    -s "$DATA_PATH" \
+    --expname "$EXP_NAME"
 
 #########################
 # 2. RENDER
