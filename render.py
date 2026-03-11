@@ -47,22 +47,24 @@ def generate_video(imgs_path, text_to_add = ''):
 def render_set(model_path, name, iteration, views, gaussians, pipeline, background,\
     no_fine, render_test=False, reconstruct=False, crop_size=0):
     render_path = os.path.join(model_path, name, "ours_{}".format(iteration), "renders")
+    render_inpaint_path = os.path.join(model_path, name, "ours_{}".format(iteration), "renders_inpaint")
     depth_path = os.path.join(model_path, name, "ours_{}".format(iteration), "depth")
     gts_path = os.path.join(model_path, name, "ours_{}".format(iteration), "gt")
     gt_depth_path = os.path.join(model_path, name, "ours_{}".format(iteration), "gt_depth")
     masks_path = os.path.join(model_path, name, "ours_{}".format(iteration), "masks")
-    normals_path = os.path.join(model_path, name, "ours_{}".format(iteration), "normals")
 
     makedirs(render_path, exist_ok=True)
+    makedirs(render_inpaint_path, exist_ok=True)
     makedirs(depth_path, exist_ok=True)
     makedirs(gts_path, exist_ok=True)
     makedirs(gt_depth_path, exist_ok=True)
     makedirs(masks_path, exist_ok=True)
-    makedirs(normals_path, exist_ok=True)
     
     render_images = []
+    render_inpaint_images = []
     render_depths = []
     gt_list = []
+    gt_inpaint_list = []
     gt_depths = []
     mask_list = []
 
@@ -70,7 +72,8 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
         stage = 'coarse' if no_fine else 'fine'
         rendering = render(view, gaussians, pipeline, background)
         render_depths.append(rendering["depth"].cpu())
-        render_images.append(rendering["render"].cpu())
+        render_images.append(rendering["render_final_image"].cpu())
+        render_inpaint_images.append(rendering["render_diffuse_image"].cpu())
         if name in ["train", "test", "video"]:
             gt = view.original_image[0:3, :, :]
             gt_list.append(gt)
@@ -78,6 +81,8 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
             mask_list.append(mask)
             gt_depth = view.original_depth
             gt_depths.append(gt_depth)
+            gt_inpaint = view.inpaint_image[0:3, :, :]
+            gt_inpaint_list.append(gt_inpaint)
 
     if render_test:
         test_times = 20
@@ -96,6 +101,13 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
         for image in tqdm(gt_list):
             torchvision.utils.save_image(image, os.path.join(gts_path, '{0:05d}'.format(count) + ".png"))
             count+=1
+
+    count = 0
+    print("writing inpaint gt images.")
+    if len(gt_inpaint_list) != 0:
+        for image in tqdm(gt_inpaint_list):
+            torchvision.utils.save_image(image, os.path.join(gts_path, '{0:05d}'.format(count) + "_inpaint.png"))
+            count+=1
             
     count = 0
     print("writing rendering images.")
@@ -104,6 +116,13 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
             torchvision.utils.save_image(image, os.path.join(render_path, '{0:05d}'.format(count) + ".png"))
             count +=1
     
+    count = 0
+    print("writing inpaint images.")
+    if len(render_inpaint_images) != 0:
+        for image in tqdm(render_inpaint_images):
+            torchvision.utils.save_image(image, os.path.join(render_inpaint_path, '{0:05d}'.format(count) + "_inpaint.png"))
+            count +=1
+
     count = 0
     print("writing mask images.")
     if len(mask_list) != 0:
@@ -131,7 +150,11 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     render_array = torch.stack(render_images, dim=0).permute(0, 2, 3, 1)
     render_array = (render_array*255).clip(0, 255).cpu().numpy().astype(np.uint8) # BxHxWxC
     imageio.mimwrite(os.path.join(model_path, name, "ours_{}".format(iteration), 'ours_video.mp4'), render_array, fps=30, quality=8)
-                    
+
+    render_inpaint_array = torch.stack(render_inpaint_images, dim=0).permute(0, 2, 3, 1)
+    render_inpaint_array = (render_inpaint_array*255).clip(0, 255).cpu().numpy().astype(np.uint8) # BxHxWxC
+    imageio.mimwrite(os.path.join(model_path, name, "ours_{}".format(iteration), 'ours_inpaint_video.mp4'), render_inpaint_array, fps=30, quality=8)
+
     FoVy, FoVx, height, width = view.FoVy, view.FoVx, view.image_height, view.image_width
     focal_y, focal_x = fov2focal(FoVy, height), fov2focal(FoVx, width)
     camera_parameters = (focal_x, focal_y, width, height)

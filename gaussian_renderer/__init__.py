@@ -14,6 +14,7 @@ import math
 from diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianRasterizer
 from scene.gaussian_model import GaussianModel
 from utils.sh_utils import eval_sh
+from utils.rgb_utils import compute_diffuse_rgb, compute_final_rgb, compute_specular_rgb
 
 def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, override_color = None):
     """
@@ -96,28 +97,44 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     rotations_final = pc.rotation_activation(rotations_final)
     opacity = pc.opacity_activation(opacity)
 
+    diffuse_color = compute_diffuse_rgb(means3D_final, pc.get_features, pc.max_sh_degree, pc.active_sh_degree, viewpoint_camera.camera_center.cuda())
+    specular_color, aux_dict = compute_specular_rgb(means3D_final, rotations_final, scales_final, viewpoint_camera.camera_center.cuda(), viewpoint_camera.camera_center.cuda(), pc.get_roughness, pc.get_F_0, scaling_modifier)
+    final_color = compute_final_rgb(diffuse_color, specular_color, aux_dict["fresnel"])
+
     # If precomputed colors are provided, use them. Otherwise, if it is desired to precompute colors
     # from SHs in Python, do it. If not, then SH -> RGB conversion will be done by rasterizer.
-    shs = None
-    colors_precomp = None
-    if override_color is None:
-        if pipe.convert_SHs_python:
-            shs_view = pc.get_features.transpose(1, 2).view(-1, 3, (pc.max_sh_degree+1)**2)
-            dir_pp = (pc.get_xyz - viewpoint_camera.camera_center.cuda().repeat(pc.get_features.shape[0], 1))
-            dir_pp_normalized = dir_pp/dir_pp.norm(dim=1, keepdim=True)
-            sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
-            colors_precomp = torch.clamp_min(sh2rgb + 0.5, 0.0)
-        else:
-            shs = pc.get_features
-    else:
-        colors_precomp = override_color
+    # shs = None
+    # colors_precomp = None
+
+    # if override_color is None:
+    #     if pipe.convert_SHs_python:
+    #         shs_view = pc.get_features.transpose(1, 2).view(-1, 3, (pc.max_sh_degree+1)**2)
+    #         dir_pp = (pc.get_xyz - viewpoint_camera.camera_center.cuda().repeat(pc.get_features.shape[0], 1))
+    #         dir_pp_normalized = dir_pp/dir_pp.norm(dim=1, keepdim=True)
+    #         sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
+    #         colors_precomp = torch.clamp_min(sh2rgb + 0.5, 0.0)
+    #     else:
+    #         shs = pc.get_features
+    # else:
+    #     colors_precomp = override_color
+
 
     # Rasterize visible Gaussians to image, obtain their radii (on screen). 
-    rendered_image, radii, depth = rasterizer(
+    rendered_diffuse_image, radii, depth = rasterizer(
         means3D = means3D_final,
         means2D = means2D,
-        shs = shs,
-        colors_precomp = colors_precomp,
+        shs = None,
+        colors_precomp = diffuse_color,
+        opacities = opacity,
+        scales = scales_final,
+        rotations = rotations_final,
+        cov3D_precomp = cov3D_precomp)
+    
+    rendered_final_image, _, _ = rasterizer(
+        means3D = means3D_final,
+        means2D = means2D,
+        shs = None,
+        colors_precomp = final_color,
         opacities = opacity,
         scales = scales_final,
         rotations = rotations_final,
@@ -125,7 +142,8 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
 
     # Those Gaussians that were frustum culled or had a radius of 0 were not visible.
     # They will be excluded from value updates used in the splitting criteria.
-    return {"render": rendered_image,
+    return {"render_diffuse_image": rendered_diffuse_image,
+            "render_final_image": rendered_final_image,
             "depth": depth,
             "viewspace_points": screenspace_points,
             "visibility_filter" : radii > 0,

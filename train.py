@@ -24,6 +24,7 @@ from argparse import ArgumentParser
 from arguments import ModelParams, PipelineParams, OptimizationParams
 from arguments import FDMHiddenParams as ModelHiddenParams
 from utils.train_utils import prepare_output_and_logger, training_report, setup_seed, save_example_images
+import torch.nn.functional as F
 
 
 def training(dataset, hyper, opt, pipe, args):
@@ -110,21 +111,31 @@ def training(dataset, hyper, opt, pipe, args):
 
         if (iteration - 1) == args.debug_from:
             pipe.debug = True
-            
+
         render_pkg = render(viewpoint_cam, gaussians, pipe, background)
-        image, depth, viewspace_point_tensor, visibility_filter, radii = \
-            render_pkg["render"], render_pkg["depth"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
-        
+        diffuse_image, final_image, depth, viewspace_point_tensor, visibility_filter, radii = \
+            render_pkg["render_diffuse_image"], render_pkg["render_final_image"], render_pkg["depth"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
+
         # -----------------------------------------------------------
         # Loss computation
         # -----------------------------------------------------------
-        gt_image = viewpoint_cam.original_image.cuda()
+        gt_inpaint_image = viewpoint_cam.inpaint_image.cuda()
         mask = viewpoint_cam.mask.cuda()
-        L1_images = l1_loss(image, gt_image, mask)
+        L1_inpaint_image = l1_loss(diffuse_image, gt_inpaint_image, mask)
+        loss = L1_inpaint_image
 
-        loss = (1.0 - opt.lambda_dssim) * L1_images
-        psnr_ = psnr(image, gt_image, mask).mean().double()
-        
+        roughness_loss = ((gaussians.get_roughness - gaussians.get_roughness.mean(dim=0)) ** 2).mean()
+        loss += roughness_loss
+
+        f0_loss = ((gaussians.get_F_0 - gaussians.get_F_0.mean(dim=0)) ** 2).mean()
+        loss += f0_loss
+
+        gt_image = viewpoint_cam.original_image.cuda()
+        L1_images = l1_loss(final_image, gt_image, mask)
+        loss += (1.0 - opt.lambda_dssim) * L1_images
+
+        psnr_ = psnr(final_image, gt_image, mask).mean().double()
+
         if opt.lambda_depth != 0 and viewpoint_cam.original_depth is not None:
             gt_depth = viewpoint_cam.original_depth.cuda()
 
@@ -135,11 +146,11 @@ def training(dataset, hyper, opt, pipe, args):
             loss += opt.lambda_depth * L_depth
 
         if opt.lambda_dssim != 0:
-            L_dssim = 1.0 - ssim(image, gt_image, mask=mask)
+            L_dssim = 1.0 - ssim(final_image, gt_image, mask=mask)
             loss += opt.lambda_dssim * L_dssim
 
         if opt.lambda_tv_image != 0:
-            L_tv_image = TV_loss(image)
+            L_tv_image = TV_loss(final_image)
             loss += opt.lambda_tv_image * L_tv_image
 
         if opt.lambda_tv_depth != 0:
@@ -174,7 +185,7 @@ def training(dataset, hyper, opt, pipe, args):
 
             # Save images
             if args.save_img_from_itr and iteration in args.save_img_from_itr:
-                save_example_images(image, gt_image, depth, gt_depth, iteration, dataset.source_path)
+                save_example_images(final_image, gt_image, depth, gt_depth, iteration, dataset.source_path)
 
             # Log and save
             report_params = {
@@ -200,7 +211,7 @@ def training(dataset, hyper, opt, pipe, args):
                 scene.save(iteration, 'fine')
 
             if (iteration in args.test_iterations):
-                print(f"[ITER {iteration}] Total Loss: {loss.item():.{7}f}, PSNR: {psnr_:.{2}f}, L1 Loss: {((1.0 - opt.lambda_dssim) * L1_images).item():.{7}f}, L_dssim: {(opt.lambda_dssim * L_dssim).item() if opt.lambda_dssim != 0 else 0:.{7}f}, L_depth: {(opt.lambda_depth * L_depth).item() if opt.lambda_depth != 0 else 0:.{7}f}, L_tv_image: {(opt.lambda_tv_image * L_tv_image).item() if opt.lambda_tv_image != 0 else 0:.{7}f}, L_tv_depth: {(opt.lambda_tv_depth * L_tv_depth).item() if opt.lambda_tv_depth != 0 else 0:.{7}f}")
+                print(f"[ITER {iteration}] Total Loss: {loss.item():.{7}f}, PSNR: {psnr_:.{2}f}, L1 Loss: {((1.0 - opt.lambda_dssim) * L1_images).item():.{7}f}, L1_inpaint_image: {L1_inpaint_image.item():.{7}f}, L_dssim: {(opt.lambda_dssim * L_dssim).item() if opt.lambda_dssim != 0 else 0:.{7}f}, L_depth: {(opt.lambda_depth * L_depth).item() if opt.lambda_depth != 0 else 0:.{7}f}, L_tv_image: {(opt.lambda_tv_image * L_tv_image).item() if opt.lambda_tv_image != 0 else 0:.{7}f}, L_tv_depth: {(opt.lambda_tv_depth * L_tv_depth).item() if opt.lambda_tv_depth != 0 else 0:.{7}f}, roughness_loss: {roughness_loss.item():.{7}f}, f0_loss: {f0_loss.item():.{7}f}")
 
             if sys_exit:
                 sys.exit()
@@ -242,6 +253,7 @@ def training(dataset, hyper, opt, pipe, args):
                 print("\n[ITER {}] Saving Checkpoint".format(iteration))
                 torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" + str(iteration) + ".pth")
 
+
 if __name__ == "__main__":
     # Set up command line argument parser
     torch.cuda.empty_cache()
@@ -256,8 +268,8 @@ if __name__ == "__main__":
     parser.add_argument('--port', type=int, default=6009)
     parser.add_argument('--debug_from', type=int, default=-1)
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
-    parser.add_argument("--test_iterations", nargs="+", type=int, default=[i*500 for i in range(0,120)])
-    parser.add_argument("--save_iterations", nargs="+", type=int, default=[3000,])
+    parser.add_argument("--test_iterations", nargs="+", type=int, default=[i for i in range(1, 10001, 1000)])
+    parser.add_argument("--save_iterations", nargs="+", type=int, default=[10000])
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--start_checkpoint", type=str, default = None)

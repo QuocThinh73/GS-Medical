@@ -126,6 +126,14 @@ class OptimizationParams(ParamGroup):
         self.opacity_threshold_fine_init = 0.005
         self.opacity_threshold_fine_after = 0.005
 
+        # pbr gaussian lrs
+        self.roughness_lr = 0.002
+        self.f0_lr = 0.002
+
+        # pbr gaussian init values
+        self.roughness_init = 0.5
+        self.f0_init = 0.05
+
         # losses params
         self.lambda_dssim = 0.2
         self.lambda_depth = 1.0
