@@ -68,7 +68,9 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
 
     for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
         stage = 'coarse' if no_fine else 'fine'
-        rendering = render(view, gaussians, pipeline, background)
+        ori_time = torch.tensor(view.time).to(gaussians.get_xyz.device)
+        d_xyz, d_scales, d_rotations = gaussians.deformation(ori_time)
+        rendering = render(view, gaussians, pipeline, background, d_xyz, d_scales, d_rotations)
         render_depths.append(rendering["depth"].cpu())
         render_images.append(rendering["render"].cpu())
         if name in ["train", "test", "video"]:
@@ -86,7 +88,9 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
                 if idx == 0 and i == 0:
                     time1 = time()
                 stage = 'coarse' if no_fine else 'fine'
-                rendering = render(view, gaussians, pipeline, background)
+                ori_time = torch.tensor(view.time).to(gaussians.get_xyz.device)
+                d_xyz, d_scales, d_rotations = gaussians.deformation(ori_time)
+                rendering = render(view, gaussians, pipeline, background, d_xyz, d_scales, d_rotations)
         time2=time()
         print("FPS:",(len(views)-1)*test_times/(time2-time1))
     

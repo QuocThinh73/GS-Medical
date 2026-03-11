@@ -94,7 +94,8 @@ class GaussianModel:
             self.max_radii2D, 
             xyz_gradient_accum, 
             denom,
-            opt_dict, 
+            opt_dict,
+            self.percent_dense,
             self.spatial_lr_scale) = model_args
         self.training_setup(training_args)
         self.xyz_gradient_accum = xyz_gradient_accum
@@ -481,7 +482,7 @@ class GaussianModel:
     @torch.no_grad()
     def update_deformation_table(self,threshold):
         # print("origin deformation point nums:",self._deformation_table.sum())
-        self._deformation_table = torch.gt(self._deformation_accum.max(dim=-1).values/100,threshold)
+        self._deformation_table = torch.gt(self._deformation_accum.max(dim=-1).values/100, threshold)
         
     
     def gaussian_deformation(self, t, ch_num = 10, basis_num = 17):
@@ -497,37 +498,28 @@ class GaussianModel:
             torch.Tensor: The deformed model tensor.
         """
         N = len(self._xyz)
-        coefs = self._coefs.reshape(N, ch_num, 3 , basis_num).contiguous() 
-        weight, mu, sigma = torch.chunk(coefs,3,-2)                       
-        exponent = (t - mu)**2/(sigma**2+1e-4)
+        coefs = self._coefs.reshape(N, ch_num, 3, basis_num).contiguous() 
+        weight, mu, sigma = torch.chunk(coefs, 3, -2)                       
+        exponent = (t - mu)**2 / (sigma**2+1e-4)
         gaussian =  torch.exp(-exponent**2)         
         return (gaussian*weight).sum(-1).squeeze()
     
-    def deformation(self, xyz: torch.Tensor, scales: torch.Tensor, rotations: torch.Tensor, time: float) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def deformation(self, time: float) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Apply flexible deformation modeling to the Gaussian model. Only the pistions, scales, and rotations are
         considered deformable in this work.
 
         Args:
-            xyz (torch.Tensor): The current positions of the model vertices. (shape: [N, 3])
-            scales (torch.Tensor): The current scales per Gaussian primitive. (shape: [N, 3])
-            rotations (torch.Tensor): The current rotations of the model. (shape: [N, 4])
             time (float): The current time.
 
         Returns:
-            tuple: A tuple containing the updated positions, scaling factors, and rotations of the model.
-                   (xyz: torch.Tensor, scales: torch.Tensor, rotations: torch.Tensor)
+            tuple: A tuple containing the deformation residual positions, scaling factors, and rotations of the model.
+                   (deform_xyz: torch.Tensor, deform_scales: torch.Tensor, deform_rotations: torch.Tensor)
         """
         deform = self.gaussian_deformation(time, ch_num=self.args.ch_num, basis_num=self.args.curve_num)
 
         deform_xyz = deform[:, :3]
-        xyz += deform_xyz
-        deform_rot = deform[:, 3:7]
-        rotations += deform_rot
-        try:
-            # when ch_num is 10
-            deform_scaling = deform[:, 7:10]
-            scales += deform_scaling
-            return xyz, scales, rotations
-        except:
-            return xyz, scales, rotations
+        deform_rotations = deform[:, 3:7]
+        deform_scales = deform[:, 7:10]
+
+        return deform_xyz, deform_scales, deform_rotations

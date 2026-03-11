@@ -15,7 +15,7 @@ from diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianR
 from scene.gaussian_model import GaussianModel
 from utils.sh_utils import eval_sh
 
-def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, override_color = None):
+def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, d_xyz, d_scales, d_rotations, scaling_modifier = 1.0, override_color = None):
     """
     Render the scene. 
     
@@ -51,11 +51,9 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
 
     rasterizer = GaussianRasterizer(raster_settings=raster_settings)
 
-    means3D = pc.get_xyz
+    means3D = pc.get_xyz + d_xyz
     means2D = screenspace_points
-    opacity = pc._opacity
-
-    ori_time = torch.tensor(viewpoint_camera.time).to(means3D.device)
+    opacity = pc.get_opacity
 
     # If precomputed 3d covariance is provided, use it. If not, then it will be computed from
     # scaling / rotation by the rasterizer.
@@ -66,35 +64,13 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     if pipe.compute_cov3D_python:
         cov3D_precomp = pc.get_covariance(scaling_modifier)
     else:
-        scales = pc._scaling
-        rotations = pc._rotation
-    deformation_point = pc._deformation_table
-    
-    means3D_deform, scales_deform, rotations_deform = pc.deformation(means3D[deformation_point], scales[deformation_point], 
-                                                                         rotations[deformation_point],
-                                                                         ori_time)
-    opacity_deform = opacity[deformation_point]
+        scales = scales = pc.scaling_activation(pc._scaling + d_scales)
+        rotations = pc.rotation_activation(pc._rotation + d_rotations)
         
-    # print(time.max())
+    deformation_point = pc._deformation_table
+        
     with torch.no_grad():
-        pc._deformation_accum[deformation_point] += torch.abs(means3D_deform - means3D[deformation_point])
-
-    means3D_final = torch.zeros_like(means3D)
-    rotations_final = torch.zeros_like(rotations)
-    scales_final = torch.zeros_like(scales)
-    opacity_final = torch.zeros_like(opacity)
-    means3D_final[deformation_point] =  means3D_deform
-    rotations_final[deformation_point] =  rotations_deform
-    scales_final[deformation_point] =  scales_deform
-    opacity_final[deformation_point] = opacity_deform
-    means3D_final[~deformation_point] = means3D[~deformation_point]
-    rotations_final[~deformation_point] = rotations[~deformation_point]
-    scales_final[~deformation_point] = scales[~deformation_point]
-    opacity_final[~deformation_point] = opacity[~deformation_point]
-
-    scales_final = pc.scaling_activation(scales_final)
-    rotations_final = pc.rotation_activation(rotations_final)
-    opacity = pc.opacity_activation(opacity)
+        pc._deformation_accum[deformation_point] += torch.abs(d_xyz[deformation_point])
 
     # If precomputed colors are provided, use them. Otherwise, if it is desired to precompute colors
     # from SHs in Python, do it. If not, then SH -> RGB conversion will be done by rasterizer.
@@ -103,7 +79,7 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     if override_color is None:
         if pipe.convert_SHs_python:
             shs_view = pc.get_features.transpose(1, 2).view(-1, 3, (pc.max_sh_degree+1)**2)
-            dir_pp = (pc.get_xyz - viewpoint_camera.camera_center.cuda().repeat(pc.get_features.shape[0], 1))
+            dir_pp = (means3D - viewpoint_camera.camera_center.cuda().repeat(pc.get_features.shape[0], 1))
             dir_pp_normalized = dir_pp/dir_pp.norm(dim=1, keepdim=True)
             sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
             colors_precomp = torch.clamp_min(sh2rgb + 0.5, 0.0)
@@ -114,13 +90,13 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
 
     # Rasterize visible Gaussians to image, obtain their radii (on screen). 
     rendered_image, radii, depth = rasterizer(
-        means3D = means3D_final,
+        means3D = means3D,
         means2D = means2D,
         shs = shs,
         colors_precomp = colors_precomp,
         opacities = opacity,
-        scales = scales_final,
-        rotations = rotations_final,
+        scales = scales,
+        rotations = rotations,
         cov3D_precomp = cov3D_precomp)
 
     # Those Gaussians that were frustum culled or had a radius of 0 were not visible.
