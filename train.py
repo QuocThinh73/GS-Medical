@@ -9,7 +9,7 @@
 #
 import torch
 from random import randint
-from utils.loss_utils import TV_loss, l1_loss, ssim
+from utils.loss_utils import TV_loss, def_reg_loss, l1_loss, ssim
 from gaussian_renderer import render
 from gaussian_renderer import network_gui
 
@@ -149,6 +149,11 @@ def training(dataset, hyper, opt, pipe, args):
             L_tv_depth = TV_loss(depth)
             loss += opt.lambda_tv_depth * L_tv_depth
 
+        loss_pos, loss_cov = def_reg_loss(scene.gaussians, d_xyz, d_rotations, d_scales)
+
+        loss += opt.lambda_def_reg_pos * loss_pos
+        loss += opt.lambda_def_reg_cov * loss_cov
+
         sys_exit = False
         if loss.isnan():
             print('nan')
@@ -194,16 +199,12 @@ def training(dataset, hyper, opt, pipe, args):
             }
             training_report(**report_params)
 
-            if (iteration in args.test_iterations):
-                print("\n[ITER {}] Saving Gaussians".format(iteration))
-                scene.save(iteration, 'fine')
-
-            if (iteration in args.save_iterations):
+            if (iteration in args.save_iterations + args.test_iterations):
                 print("\n[ITER {}] Saving Gaussians".format(iteration))
                 scene.save(iteration, 'fine')
 
             if (iteration in args.test_iterations):
-                print(f"[ITER {iteration}] Total Loss: {loss.item():.{7}f}, PSNR: {psnr_:.{2}f}, L1 Loss: {((1.0 - opt.lambda_dssim) * L1_images).item():.{7}f}, L_dssim: {(opt.lambda_dssim * L_dssim).item() if opt.lambda_dssim != 0 else 0:.{7}f}, L_depth: {(opt.lambda_depth * L_depth).item() if opt.lambda_depth != 0 else 0:.{7}f}, L_tv_image: {(opt.lambda_tv_image * L_tv_image).item() if opt.lambda_tv_image != 0 else 0:.{7}f}, L_tv_depth: {(opt.lambda_tv_depth * L_tv_depth).item() if opt.lambda_tv_depth != 0 else 0:.{7}f}")
+                print(f"[ITER {iteration}] Total Loss: {loss.item():.{7}f}, PSNR: {psnr_:.{2}f}, L1 Loss: {((1.0 - opt.lambda_dssim) * L1_images).item():.{7}f}, L_dssim: {(opt.lambda_dssim * L_dssim).item() if opt.lambda_dssim != 0 else 0:.{7}f}, L_depth: {(opt.lambda_depth * L_depth).item() if opt.lambda_depth != 0 else 0:.{7}f}, L_tv_image: {(opt.lambda_tv_image * L_tv_image).item() if opt.lambda_tv_image != 0 else 0:.{7}f}, L_tv_depth: {(opt.lambda_tv_depth * L_tv_depth).item() if opt.lambda_tv_depth != 0 else 0:.{7}f}, L_def_reg_pos: {(opt.lambda_def_reg_pos * loss_pos).item() if opt.lambda_def_reg_pos != 0 else 0:.{7}f}, L_def_reg_cov: {(opt.lambda_def_reg_cov * loss_cov).item() if opt.lambda_def_reg_cov != 0 else 0:.{7}f}")
 
             if sys_exit:
                 sys.exit()
@@ -259,8 +260,8 @@ if __name__ == "__main__":
     parser.add_argument('--port', type=int, default=6009)
     parser.add_argument('--debug_from', type=int, default=-1)
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
-    parser.add_argument("--test_iterations", nargs="+", type=int, default=[i*500 for i in range(0,120)])
-    parser.add_argument("--save_iterations", nargs="+", type=int, default=[3000,])
+    parser.add_argument("--test_iterations", nargs="+", type=int, default=[i*1000 for i in range(0,40)])
+    parser.add_argument("--save_iterations", nargs="+", type=int, default=[i*1000 for i in range(0,40)])
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--start_checkpoint", type=str, default = None)

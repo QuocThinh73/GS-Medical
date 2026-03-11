@@ -131,6 +131,9 @@ class GaussianModel:
     def get_covariance(self, scaling_modifier = 1):
         return self.covariance_activation(self.get_scaling, scaling_modifier, self._rotation)
     
+    def get_covariance_obs(self, d_rotation, d_scaling, scaling_modifier=1):
+        return self.covariance_activation(self._scaling + d_scaling, scaling_modifier, self._rotation + d_rotation)
+    
     def oneupSHdegree(self):
         if self.active_sh_degree < self.max_sh_degree:
             self.active_sh_degree += 1

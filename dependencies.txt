@@ -8,7 +8,3 @@ pip install --force-reinstall -v "numpy==1.25.2"
 git submodule update --init --recursive
 pip install -e submodules/depth-diff-gaussian-rasterization --use-pep517 --no-build-isolation
 pip install -e submodules/simple-knn --use-pep517 --no-build-isolation
-cd submodules
-pip install git+https://github.com/smbonilla/gaussian-norms.git --use-pep517 --no-build-isolation
-cd ..
-pip install https://github.com/kyamagu/faiss-wheels/releases/download/v1.7.3/faiss_gpu-1.7.3-cp39-cp39-manylinux_2_17_x86_64.manylinux2014_x86_64.whl 

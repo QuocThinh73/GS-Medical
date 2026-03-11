@@ -102,8 +102,6 @@ class OptimizationParams(ParamGroup):
         self.deformation_lr_init = 0.00016
         self.deformation_lr_final = 0.000016
         self.deformation_lr_delay_mult = 0.01
-        # self.grid_lr_init = 0.0016
-        # self.grid_lr_final = 0.00016
 
         self.feature_lr = 0.0025
         self.opacity_lr = 0.05
@@ -131,6 +129,8 @@ class OptimizationParams(ParamGroup):
         self.lambda_depth = 1.0
         self.lambda_tv_image = 0.01
         self.lambda_tv_depth = 0.01
+        self.lambda_def_reg_pos = 0.5
+        self.lambda_def_reg_cov = 0.0
         
         super().__init__(parser, "Optimization Parameters")
 

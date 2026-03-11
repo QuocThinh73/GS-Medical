@@ -13,6 +13,7 @@ import torch
 import torch.nn.functional as F
 from torch.autograd import Variable
 from math import exp
+from pytorch3d.ops.knn import knn_points
 
 
 def l1_loss(network_output, gt, mask=None):
@@ -92,3 +93,23 @@ def TV_loss(x):
     tv_h = torch.abs(x[:, 1:, :] - x[:, :-1, :]).sum()
     tv_w = torch.abs(x[:, :, 1:] - x[:, :, :-1]).sum()
     return (tv_h + tv_w) / (C * H * W)
+
+def def_reg_loss(gs_can, d_xyz, d_rotation, d_scaling, K=5):
+    xyz_can = gs_can.get_xyz
+    xyz_obs = xyz_can + d_xyz
+
+    cov_can = gs_can.get_covariance()
+    cov_obs = gs_can.get_covariance_obs(d_rotation, d_scaling)
+
+    _, nn_ix, _ = knn_points(xyz_can.unsqueeze(0), xyz_can.unsqueeze(0), K=K, return_sorted=True)
+    nn_ix = nn_ix.squeeze(0)
+
+    dis_xyz_can = torch.cdist(xyz_can.unsqueeze(1), xyz_can[nn_ix])[:, 0, 1:]
+    dis_xyz_obs = torch.cdist(xyz_obs.unsqueeze(1), xyz_obs[nn_ix])[:, 0, 1:]
+    loss_pos = F.l1_loss(dis_xyz_can, dis_xyz_obs)
+
+    dis_cov_can = torch.cdist(cov_can.unsqueeze(1), cov_can[nn_ix])[:, 0, 1:]
+    dis_cov_obs = torch.cdist(cov_obs.unsqueeze(1), cov_obs[nn_ix])[:, 0, 1:]
+    loss_cov = F.l1_loss(dis_cov_can, dis_cov_obs)
+
+    return loss_pos, loss_cov

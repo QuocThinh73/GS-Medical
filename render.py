@@ -214,7 +214,7 @@ if __name__ == "__main__":
     model = ModelParams(parser, sentinel=True)
     pipeline = PipelineParams(parser)
     hyperparam = FDMHiddenParams(parser)
-    parser.add_argument("--iteration", default=-1, type=int)
+    parser.add_argument("--iteration", default=5000, type=int)
     parser.add_argument("--skip_train", action="store_true")
     parser.add_argument("--skip_test", action="store_true")
     parser.add_argument("--quiet", action="store_true")
