@@ -94,11 +94,11 @@ class FDMHiddenParams(ParamGroup):
 class OptimizationParams(ParamGroup):
     def __init__(self, parser):
         self.dataloader=False
-        self.iterations = 30_000
+        self.iterations = 40_000
         self.position_lr_init = 0.00016
         self.position_lr_final = 0.0000016
         self.position_lr_delay_mult = 0.01
-        self.position_lr_max_steps = 20_000
+        self.position_lr_max_steps = 40_000
         self.deformation_lr_init = 0.00016
         self.deformation_lr_final = 0.000016
         self.deformation_lr_delay_mult = 0.01

@@ -51,20 +51,24 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     gts_path = os.path.join(model_path, name, "ours_{}".format(iteration), "gt")
     gt_depth_path = os.path.join(model_path, name, "ours_{}".format(iteration), "gt_depth")
     masks_path = os.path.join(model_path, name, "ours_{}".format(iteration), "masks")
-    normals_path = os.path.join(model_path, name, "ours_{}".format(iteration), "normals")
+    inpaint_path = os.path.join(model_path, name, "ours_{}".format(iteration), "inpaint")
+    specular_mask_path = os.path.join(model_path, name, "ours_{}".format(iteration), "specular_masks")
 
     makedirs(render_path, exist_ok=True)
     makedirs(depth_path, exist_ok=True)
     makedirs(gts_path, exist_ok=True)
     makedirs(gt_depth_path, exist_ok=True)
     makedirs(masks_path, exist_ok=True)
-    makedirs(normals_path, exist_ok=True)
+    makedirs(inpaint_path, exist_ok=True)
+    makedirs(specular_mask_path, exist_ok=True)
     
     render_images = []
     render_depths = []
     gt_list = []
     gt_depths = []
     mask_list = []
+    inpaints = []
+    specular_masks = []
 
     for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
         stage = 'coarse' if no_fine else 'fine'
@@ -80,6 +84,10 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
             mask_list.append(mask)
             gt_depth = view.original_depth
             gt_depths.append(gt_depth)
+            inpaint = view.inpaint_image[0:3, :, :]
+            inpaints.append(inpaint)
+            specular_mask = view.specular_mask
+            specular_masks.append(specular_mask)
 
     if render_test:
         test_times = 20
@@ -95,10 +103,25 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
         print("FPS:",(len(views)-1)*test_times/(time2-time1))
     
     count = 0
-    print("writing training images.")
+    print("writing gt images.")
     if len(gt_list) != 0:
         for image in tqdm(gt_list):
             torchvision.utils.save_image(image, os.path.join(gts_path, '{0:05d}'.format(count) + ".png"))
+            count+=1
+
+    count = 0
+    print("writing inpaint images.")
+    if len(inpaints) != 0:
+        for image in tqdm(inpaints):
+            torchvision.utils.save_image(image, os.path.join(inpaint_path, '{0:05d}'.format(count) + ".png"))
+            count+=1
+
+    count = 0
+    print("writing specular mask images.")
+    if len(specular_masks) != 0:
+        for image in tqdm(specular_masks):
+            image = image.float()
+            torchvision.utils.save_image(image, os.path.join(specular_mask_path, '{0:05d}'.format(count) + ".png"))
             count+=1
             
     count = 0
@@ -135,6 +158,10 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     render_array = torch.stack(render_images, dim=0).permute(0, 2, 3, 1)
     render_array = (render_array*255).clip(0, 255).cpu().numpy().astype(np.uint8) # BxHxWxC
     imageio.mimwrite(os.path.join(model_path, name, "ours_{}".format(iteration), 'ours_video.mp4'), render_array, fps=30, quality=8)
+
+    render_array = torch.stack(inpaints, dim=0).permute(0, 2, 3, 1)
+    render_array = (render_array*255).clip(0, 255).cpu().numpy().astype(np.uint8) # BxHxWxC
+    imageio.mimwrite(os.path.join(model_path, name, "ours_{}".format(iteration), 'inpaint_video.mp4'), render_array, fps=30, quality=8)
                     
     FoVy, FoVx, height, width = view.FoVy, view.FoVx, view.image_height, view.image_width
     focal_y, focal_x = fov2focal(FoVy, height), fov2focal(FoVx, width)

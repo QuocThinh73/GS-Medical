@@ -48,6 +48,14 @@ python train.py \
 echo "[2/3] Rendering..."
 python render.py \
     --model_path "$MODEL_PATH"
+for iter in $(seq 1000 1000 40000)
+do
+    echo "Rendering iteration $iter"
+    python render.py \
+        --model_path "$MODEL_PATH" \
+        --iteration $iter \
+        --quiet
+done
 
 #########################
 # 3. EVALUATION

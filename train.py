@@ -151,8 +151,11 @@ def training(dataset, hyper, opt, pipe, args):
 
         loss_pos, loss_cov = def_reg_loss(scene.gaussians, d_xyz, d_rotations, d_scales)
 
-        loss += opt.lambda_def_reg_pos * loss_pos
-        loss += opt.lambda_def_reg_cov * loss_cov
+        if opt.lambda_def_reg_pos != 0:
+            loss += opt.lambda_def_reg_pos * loss_pos
+
+        if opt.lambda_def_reg_cov != 0:
+            loss += opt.lambda_def_reg_cov * loss_cov
 
         sys_exit = False
         if loss.isnan():
@@ -260,9 +263,9 @@ if __name__ == "__main__":
     parser.add_argument('--port', type=int, default=6009)
     parser.add_argument('--debug_from', type=int, default=-1)
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
-    parser.add_argument("--test_iterations", nargs="+", type=int, default=[i*1000 for i in range(0,40)])
-    parser.add_argument("--save_iterations", nargs="+", type=int, default=[i*1000 for i in range(0,40)])
-    parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
+    parser.add_argument("--test_iterations", nargs="+", type=int, default=[i*1000 for i in range(0,100)])
+    parser.add_argument("--save_iterations", nargs="+", type=int, default=[i*1000 for i in range(0,100)])
+    parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[i*1000 for i in range(0,100)])
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--start_checkpoint", type=str, default = None)
     parser.add_argument("--expname", type=str, default = "endonerf/pulling_soft_tissues")
