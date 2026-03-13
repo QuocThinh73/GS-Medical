@@ -67,9 +67,13 @@ def cal_lpips(a, b, device="cuda", batch=2):
     lpips_mean = lpips_all.mean()
     return lpips_mean
 
-def readImages(renders_dir, gt_dir, depth_dir, gtdepth_dir, masks_dir):
+def readImages(renders_dir, gt_dir, renders_inpaint_dir, gt_inpaint_dir, depth_dir, gtdepth_dir, masks_dir):
     renders = []
     gts = []
+
+    renders_inpaint = []
+    gts_inpaint = []
+
     image_names = []
     depths = []
     gt_depths = []
@@ -78,18 +82,27 @@ def readImages(renders_dir, gt_dir, depth_dir, gtdepth_dir, masks_dir):
     for fname in os.listdir(renders_dir):
         render = np.array(Image.open(renders_dir / fname))
         gt = np.array(Image.open(gt_dir / fname))
+
+        render_inpaint = np.array(Image.open(renders_inpaint_dir / fname))
+        gt_inpaint = np.array(Image.open(gt_inpaint_dir / fname))
+
         depth = np.array(Image.open(depth_dir / fname))
         gt_depth = np.array(Image.open(gtdepth_dir / fname))
         mask = np.array(Image.open(masks_dir / fname))
         
         renders.append(tf.to_tensor(render).unsqueeze(0)[:, :3, :, :].cuda())
         gts.append(tf.to_tensor(gt).unsqueeze(0)[:, :3, :, :].cuda())
-        depths.append(torch.from_numpy(depth).unsqueeze(0).unsqueeze(1)[:, :, :, :].cuda())
-        gt_depths.append(torch.from_numpy(gt_depth).unsqueeze(0).unsqueeze(1)[:, :3, :, :].cuda())
+
+        renders_inpaint.append(tf.to_tensor(render_inpaint).unsqueeze(0)[:, :3, :, :].cuda())
+        gts_inpaint.append(tf.to_tensor(gt_inpaint).unsqueeze(0)[:, :3, :, :].cuda())
+
+        depths.append(torch.from_numpy(depth).unsqueeze(0).unsqueeze(1).cuda())
+        gt_depths.append(torch.from_numpy(gt_depth).unsqueeze(0).unsqueeze(1).cuda())
         masks.append(tf.to_tensor(mask).unsqueeze(0).cuda())
         
         image_names.append(fname)
-    return renders, gts, depths, gt_depths, masks, image_names
+
+    return renders, gts, renders_inpaint, gts_inpaint, depths, gt_depths, masks, image_names
 
 def evaluate(model_paths):
 
@@ -118,44 +131,94 @@ def evaluate(model_paths):
                 per_view_dict_polytopeonly[scene_dir][method] = {}
 
                 method_dir = test_dir / method
-                gt_dir = method_dir/ "gt"
+                gt_dir = method_dir / "gt"
+                gt_inpaint_dir = method_dir / "gt_inpaint"
                 renders_dir = method_dir / "renders"
+                renders_inpaint_dir = method_dir / "renders_inpaint"
                 depth_dir = method_dir / "depth"
                 gt_depth_dir = method_dir / "gt_depth"
                 masks_dir = method_dir / "masks"
                 
-                renders, gts, depths, gt_depths, masks, image_names = readImages(renders_dir, gt_dir, depth_dir, gt_depth_dir, masks_dir)
+                renders, gts, renders_inpaint, gts_inpaint, depths, gt_depths, masks, image_names = readImages(
+                    renders_dir, gt_dir,
+                    renders_inpaint_dir, gt_inpaint_dir,
+                    depth_dir, gt_depth_dir, masks_dir
+                )
 
-                ssims = []
-                psnrs = []
-                lpipss = []
+                final_ssims = []
+                final_psnrs = []
+                final_lpipss = []
+
+                inpaint_ssims = []
+                inpaint_psnrs = []
+                inpaint_lpipss = []
+
                 rmses = []
                                 
                 for idx in tqdm(range(len(renders)), desc="Metric evaluation progress"):
-                    render, gt, depth, gt_depth, mask = renders[idx], gts[idx], depths[idx], gt_depths[idx], masks[idx]
-                    render = render * mask
-                    gt = gt * mask
-                    psnrs.append(psnr(render, gt))
-                    ssims.append(ssim(render, gt))
-                    lpipss.append(cal_lpips(render, gt))
-                    if (gt_depth!=0).sum() < 10:
-                        continue
-                    rmses.append(rmse(depth, gt_depth, mask))
+                    render = renders[idx]
+                    gt = gts[idx]
 
-                print("Scene: ", scene_dir,  "SSIM : {:>12.7f}".format(torch.tensor(ssims).mean(), ".5"))
-                print("Scene: ", scene_dir,  "PSNR : {:>12.7f}".format(torch.tensor(psnrs).mean(), ".5"))
-                print("Scene: ", scene_dir,  "LPIPS: {:>12.7f}".format(torch.tensor(lpipss).mean(), ".5"))
-                print("Scene: ", scene_dir,  "RMSE: {:>12.7f}".format(torch.tensor(rmses).mean(), ".5"))
+                    render_inpaint = renders_inpaint[idx]
+                    gt_inpaint = gts_inpaint[idx]
+
+                    depth = depths[idx]
+                    gt_depth = gt_depths[idx]
+                    mask = masks[idx]
+
+                    # final branch
+                    render_masked = render * mask
+                    gt_masked = gt * mask
+
+                    final_psnrs.append(psnr(render_masked, gt_masked))
+                    final_ssims.append(ssim(render_masked, gt_masked))
+                    final_lpipss.append(cal_lpips(render_masked, gt_masked))
+
+                    # inpaint branch
+                    render_inpaint_masked = render_inpaint * mask
+                    gt_inpaint_masked = gt_inpaint * mask
+
+                    inpaint_psnrs.append(psnr(render_inpaint_masked, gt_inpaint_masked))
+                    inpaint_ssims.append(ssim(render_inpaint_masked, gt_inpaint_masked))
+                    inpaint_lpipss.append(cal_lpips(render_inpaint_masked, gt_inpaint_masked))
+
+                    # depth
+                    if (gt_depth != 0).sum() >= 10:
+                        rmses.append(rmse(depth, gt_depth, mask))
+
+                print("Scene: ", scene_dir, "FINAL SSIM : {:>12.7f}".format(torch.tensor(final_ssims).mean(), ".5"))
+                print("Scene: ", scene_dir, "FINAL PSNR : {:>12.7f}".format(torch.tensor(final_psnrs).mean(), ".5"))
+                print("Scene: ", scene_dir, "FINAL LPIPS: {:>12.7f}".format(torch.tensor(final_lpipss).mean(), ".5"))
+
+                print("Scene: ", scene_dir, "INPAINT SSIM : {:>12.7f}".format(torch.tensor(inpaint_ssims).mean(), ".5"))
+                print("Scene: ", scene_dir, "INPAINT PSNR : {:>12.7f}".format(torch.tensor(inpaint_psnrs).mean(), ".5"))
+                print("Scene: ", scene_dir, "INPAINT LPIPS: {:>12.7f}".format(torch.tensor(inpaint_lpipss).mean(), ".5"))
+
+                print("Scene: ", scene_dir, "RMSE: {:>12.7f}".format(torch.tensor(rmses).mean(), ".5"))
                 print("")
 
-                full_dict[scene_dir][method].update({"SSIM": torch.tensor(ssims).mean().item(),
-                                                        "PSNR": torch.tensor(psnrs).mean().item(),
-                                                        "LPIPS": torch.tensor(lpipss).mean().item(),
-                                                        "RMSE": torch.tensor(rmses).mean().item()})
-                per_view_dict[scene_dir][method].update({"SSIM": {name: ssim for ssim, name in zip(torch.tensor(ssims).tolist(), image_names)},
-                                                            "PSNR": {name: psnr for psnr, name in zip(torch.tensor(psnrs).tolist(), image_names)},
-                                                            "LPIPS": {name: lp for lp, name in zip(torch.tensor(lpipss).tolist(), image_names)},
-                                                            "RMSES": {name: lp for lp, name in zip(torch.tensor(rmses).tolist(), image_names)}})
+                full_dict[scene_dir][method].update({
+                    "FINAL_SSIM": torch.tensor(final_ssims).mean().item(),
+                    "FINAL_PSNR": torch.tensor(final_psnrs).mean().item(),
+                    "FINAL_LPIPS": torch.tensor(final_lpipss).mean().item(),
+
+                    "INPAINT_SSIM": torch.tensor(inpaint_ssims).mean().item(),
+                    "INPAINT_PSNR": torch.tensor(inpaint_psnrs).mean().item(),
+                    "INPAINT_LPIPS": torch.tensor(inpaint_lpipss).mean().item(),
+
+                    "RMSE": torch.tensor(rmses).mean().item() if len(rmses) > 0 else None
+                })
+                per_view_dict[scene_dir][method].update({
+                    "FINAL_SSIM": {name: val for val, name in zip(torch.tensor(final_ssims).tolist(), image_names)},
+                    "FINAL_PSNR": {name: val for val, name in zip(torch.tensor(final_psnrs).tolist(), image_names)},
+                    "FINAL_LPIPS": {name: val for val, name in zip(torch.tensor(final_lpipss).tolist(), image_names)},
+
+                    "INPAINT_SSIM": {name: val for val, name in zip(torch.tensor(inpaint_ssims).tolist(), image_names)},
+                    "INPAINT_PSNR": {name: val for val, name in zip(torch.tensor(inpaint_psnrs).tolist(), image_names)},
+                    "INPAINT_LPIPS": {name: val for val, name in zip(torch.tensor(inpaint_lpipss).tolist(), image_names)},
+
+                    "RMSE": {name: val for val, name in zip(torch.tensor(rmses).tolist(), image_names[:len(rmses)])}
+                })
 
             with open(scene_dir + "/results.json", 'w') as fp:
                 json.dump(full_dict[scene_dir], fp, indent=True)

@@ -72,6 +72,7 @@ class Scene:
                                                     "point_cloud",
                                                     "iteration_" + str(self.loaded_iter),
                                                    ))
+            self.gaussians.load_specular_mlp(os.path.join(self.model_path, "specular_mlp.pth"))
         else:
             print("Creating scene from point cloud")
             self.gaussians.create_from_pcd(scene_info.point_cloud, args.camera_extent, self.maxtime, init_args=init_train_args)
@@ -83,6 +84,7 @@ class Scene:
             point_cloud_path = os.path.join(self.model_path, "point_cloud/iteration_{}".format(iteration))
         self.gaussians.save_ply(os.path.join(point_cloud_path, "point_cloud.ply"))
         # self.gaussians.save_deformation(point_cloud_path)
+        self.gaussians.save_specular_mlp(os.path.join(self.model_path, "specular_mlp.pth"))
     
     def getTrainCameras(self, scale=1.0):
         return self.train_camera

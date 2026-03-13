@@ -115,18 +115,35 @@ def training(dataset, hyper, opt, pipe, args):
         d_xyz, d_scales, d_rotations = gaussians.deformation(ori_time)
 
         render_pkg = render(viewpoint_cam, gaussians, pipe, background, d_xyz, d_scales, d_rotations)
-        image, depth, viewspace_point_tensor, visibility_filter, radii = \
-            render_pkg["render"], render_pkg["depth"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
-        
+        inpaint_image, specular_image, depth, viewspace_point_tensor, visibility_filter, radii = \
+            render_pkg["render_inpaint"], render_pkg["render_specular"], render_pkg["depth"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
+
+        final_image = torch.clamp(inpaint_image.detach() + specular_image, 0.0, 1.0)
+
         # -----------------------------------------------------------
         # Loss computation
         # -----------------------------------------------------------
-        gt_image = viewpoint_cam.original_image.cuda()
+        gt_final_image = viewpoint_cam.original_image.cuda()
+        gt_inpaint_image = viewpoint_cam.inpaint_image.cuda()
         mask = viewpoint_cam.mask.cuda()
-        L1_images = l1_loss(image, gt_image, mask)
+        # specular_mask_raw = viewpoint_cam.specular_mask.cuda().float()
+        # specular_mask = 1.0 - specular_mask_raw
 
-        loss = (1.0 - opt.lambda_dssim) * L1_images
-        psnr_ = psnr(image, gt_image, mask).mean().double()
+        L1_inpaint_images = l1_loss(inpaint_image, gt_inpaint_image, mask)
+        L1_specular_images = l1_loss(specular_image, gt_final_image - gt_inpaint_image, mask)
+        L1_final_images = l1_loss(final_image, gt_final_image, mask)
+
+        psnr_inpaint = psnr(inpaint_image, gt_inpaint_image, mask).mean().double()
+        psnr_final = psnr(final_image, gt_final_image, mask).mean().double()
+
+        loss = (1.0 - opt.lambda_dssim) * L1_inpaint_images
+
+        if opt.lambda_dssim != 0:
+            L_dssim_inpaint = 1.0 - ssim(inpaint_image, gt_inpaint_image, mask=mask)
+            loss += opt.lambda_dssim * L_dssim_inpaint
+
+        if opt.lambda_specular != 0 and iteration > opt.lambda_specular_start:
+            loss += opt.lambda_specular * L1_specular_images
         
         if opt.lambda_depth != 0 and viewpoint_cam.original_depth is not None:
             gt_depth = viewpoint_cam.original_depth.cuda()
@@ -137,13 +154,13 @@ def training(dataset, hyper, opt, pipe, args):
             L_depth = l1_loss(depth, gt_depth, mask)
             loss += opt.lambda_depth * L_depth
 
-        if opt.lambda_dssim != 0:
-            L_dssim = 1.0 - ssim(image, gt_image, mask=mask)
-            loss += opt.lambda_dssim * L_dssim
-
         if opt.lambda_tv_image != 0:
-            L_tv_image = TV_loss(image)
-            loss += opt.lambda_tv_image * L_tv_image
+            L_tv_inpaint_image = TV_loss(inpaint_image)
+            loss += opt.lambda_tv_image * L_tv_inpaint_image
+            # if iteration > opt.lambda_specular_start:
+            #     L_tv_final_image = TV_loss(final_image)
+            #     loss += opt.lambda_tv_image * L_tv_final_image
+            L_tv_final_image = L_tv_inpaint_image
 
         if opt.lambda_tv_depth != 0:
             L_tv_depth = TV_loss(depth)
@@ -177,7 +194,8 @@ def training(dataset, hyper, opt, pipe, args):
             total_point = gaussians._xyz.shape[0]
             if iteration % 10 == 0:
                 progress_bar.set_postfix({"Loss": f"{loss.item():.{7}f}",
-                                          "psnr": f"{psnr_:.{2}f}",
+                                          "psnr_inpaint": f"{psnr_inpaint:.{2}f}",
+                                          "psnr_final": f"{psnr_final:.{2}f}",
                                           "point":f"{total_point}"})
                 progress_bar.update(10)
             if iteration == opt.iterations:
@@ -185,13 +203,13 @@ def training(dataset, hyper, opt, pipe, args):
 
             # Save images
             if args.save_img_from_itr and iteration in args.save_img_from_itr:
-                save_example_images(image, gt_image, depth, gt_depth, iteration, dataset.source_path)
+                save_example_images(final_image, gt_final_image, depth, gt_depth, iteration, dataset.source_path)
 
             # Log and save
             report_params = {
                 "tb_writer": tb_writer,
                 "iteration": iteration,
-                "Ll1": L1_images,
+                "Ll1": L1_final_images,
                 "loss": loss,
                 "l1_loss": l1_loss,
                 "elapsed": iter_time,
@@ -207,8 +225,20 @@ def training(dataset, hyper, opt, pipe, args):
                 scene.save(iteration, 'fine')
 
             if (iteration in args.test_iterations):
-                print(f"[ITER {iteration}] Total Loss: {loss.item():.{7}f}, PSNR: {psnr_:.{2}f}, L1 Loss: {((1.0 - opt.lambda_dssim) * L1_images).item():.{7}f}, L_dssim: {(opt.lambda_dssim * L_dssim).item() if opt.lambda_dssim != 0 else 0:.{7}f}, L_depth: {(opt.lambda_depth * L_depth).item() if opt.lambda_depth != 0 else 0:.{7}f}, L_tv_image: {(opt.lambda_tv_image * L_tv_image).item() if opt.lambda_tv_image != 0 else 0:.{7}f}, L_tv_depth: {(opt.lambda_tv_depth * L_tv_depth).item() if opt.lambda_tv_depth != 0 else 0:.{7}f}, L_def_reg_pos: {(opt.lambda_def_reg_pos * loss_pos).item() if opt.lambda_def_reg_pos != 0 else 0:.{7}f}, L_def_reg_cov: {(opt.lambda_def_reg_cov * loss_cov).item() if opt.lambda_def_reg_cov != 0 else 0:.{7}f}")
-
+                print(
+                    f"[ITER {iteration}] Total Loss: {loss.item():.7f}, " 
+                    f"PSNR inpaint: {psnr_inpaint:.2f}, "
+                    f"PSNR final: {psnr_final:.2f}, "
+                    f"Loss inpaint: {((1.0 - opt.lambda_dssim) * L1_inpaint_images).item():.7f}, "
+                    f"Loss specular: {(opt.lambda_specular * L1_specular_images).item():.7f}, "
+                    f"L_dssim_inpaint: {(opt.lambda_dssim * L_dssim_inpaint).item() if opt.lambda_dssim != 0 else 0:.7f}, "
+                    f"L_depth: {(opt.lambda_depth * L_depth).item() if opt.lambda_depth != 0 else 0:.7f}, "
+                    f"L_tv_inpaint_image: {(opt.lambda_tv_image * L_tv_inpaint_image).item() if opt.lambda_tv_image != 0 else 0:.7f}, "
+                    f"L_tv_final_image: {(opt.lambda_tv_image * L_tv_final_image).item() if opt.lambda_tv_image != 0 else 0:.7f}, "
+                    f"L_tv_depth: {(opt.lambda_tv_depth * L_tv_depth).item() if opt.lambda_tv_depth != 0 else 0:.7f}, "
+                    f"L_def_reg_pos: {(opt.lambda_def_reg_pos * loss_pos).item() if opt.lambda_def_reg_pos != 0 else 0:.7f}, "
+                    f"L_def_reg_cov: {(opt.lambda_def_reg_cov * loss_cov).item() if opt.lambda_def_reg_cov != 0 else 0:.7f}"
+                )
             if sys_exit:
                 sys.exit()
             

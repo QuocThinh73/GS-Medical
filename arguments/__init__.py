@@ -87,6 +87,9 @@ class FDMHiddenParams(ParamGroup):
         self.ch_num = 10
         self.curve_num = 17
         self.init_param = 0.01
+
+        # specular mlp
+        self.spec_dim = 32
         
         super().__init__(parser, "FDMHiddenParams")
 
@@ -94,11 +97,11 @@ class FDMHiddenParams(ParamGroup):
 class OptimizationParams(ParamGroup):
     def __init__(self, parser):
         self.dataloader=False
-        self.iterations = 40_000
+        self.iterations = 30000
         self.position_lr_init = 0.00016
         self.position_lr_final = 0.0000016
         self.position_lr_delay_mult = 0.01
-        self.position_lr_max_steps = 40_000
+        self.position_lr_max_steps = 30000
         self.deformation_lr_init = 0.00016
         self.deformation_lr_final = 0.000016
         self.deformation_lr_delay_mult = 0.01
@@ -131,6 +134,12 @@ class OptimizationParams(ParamGroup):
         self.lambda_tv_depth = 0.01
         self.lambda_def_reg_pos = 0.5
         self.lambda_def_reg_cov = 0.0
+        self.lambda_specular = 1.0
+
+        self.lambda_specular_start = 0
+
+        self.specular_embedding_lr = 0.01
+        self.specular_mlp_lr = 0.0005
         
         super().__init__(parser, "Optimization Parameters")
 

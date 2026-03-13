@@ -21,6 +21,7 @@ from simple_knn._C import distCUDA2
 from utils.graphics_utils import BasicPointCloud
 from utils.general_utils import strip_symmetric, build_scaling_rotation
 from typing import Tuple
+from scene.specular_model import SpecularMLP
 
 
 class GaussianModel:
@@ -64,6 +65,9 @@ class GaussianModel:
         self.spatial_lr_scale = 0
         self.setup_functions()
 
+        self._specular_embedding = torch.empty(0)
+        self._specular_mlp = SpecularMLP(spec_dim=args.spec_dim).cuda()
+
     def capture(self):
         return (
             self.active_sh_degree,
@@ -80,6 +84,7 @@ class GaussianModel:
             self.optimizer.state_dict(),
             self.percent_dense,
             self.spatial_lr_scale,
+            self._specular_embedding
         )
     
     def restore(self, model_args, training_args):
@@ -96,7 +101,8 @@ class GaussianModel:
             denom,
             opt_dict,
             self.percent_dense,
-            self.spatial_lr_scale) = model_args
+            self.spatial_lr_scale,
+            self._specular_embedding) = model_args
         self.training_setup(training_args)
         self.xyz_gradient_accum = xyz_gradient_accum
         self.denom = denom
@@ -171,6 +177,8 @@ class GaussianModel:
         self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
         self._deformation_table = torch.gt(torch.ones((self.get_xyz.shape[0]),device="cuda"),0)
 
+        self._specular_embedding = nn.Parameter(0.01 * torch.randn((N, self.args.spec_dim), dtype=torch.float, device="cuda"))
+
         print("Finished creating Gaussian model from point cloud.")
     
     def training_setup(self, training_args):
@@ -186,7 +194,9 @@ class GaussianModel:
             {'params': [self._opacity], 'lr': training_args.opacity_lr, "name": "opacity"},
             {'params': [self._scaling], 'lr': training_args.scaling_lr, "name": "scaling"},
             {'params': [self._rotation], 'lr': training_args.rotation_lr, "name": "rotation"},
-            {'params': [self._coefs], 'lr': training_args.deformation_lr_init * self.spatial_lr_scale, "name": "coefs"}
+            {'params': [self._coefs], 'lr': training_args.deformation_lr_init * self.spatial_lr_scale, "name": "coefs"},
+            {'params': [self._specular_embedding], 'lr': training_args.specular_embedding_lr, "name": "specular_embedding"},
+            {'params': self._specular_mlp.parameters(), 'lr': training_args.specular_mlp_lr, "name": "specular_mlp"},
         ]
 
         self.optimizer = torch.optim.Adam(l, lr=0.0, eps=1e-15)
@@ -229,6 +239,8 @@ class GaussianModel:
             l.append('rot_{}'.format(i))
         for i in range(self._coefs.shape[1]):
             l.append('coefs_{}'.format(i))
+        for i in range(self._specular_embedding.shape[1]):
+            l.append('specular_embedding_{}'.format(i))
         return l
 
     def load_model(self, path):
@@ -284,6 +296,16 @@ class GaussianModel:
         for idx, attr_name in enumerate(coef_names):
             coefs[:, idx] = np.asarray(plydata.elements[0][attr_name])
 
+        spec_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("specular_embedding_")]
+        spec_names = sorted(spec_names, key=lambda x: int(x.split('_')[-1]))
+
+        if len(spec_names) > 0:
+            spec_embed = np.zeros((xyz.shape[0], len(spec_names)))
+            for idx, attr_name in enumerate(spec_names):
+                spec_embed[:, idx] = np.asarray(plydata.elements[0][attr_name])
+        else:
+            spec_embed = np.zeros((xyz.shape[0], self.args.spec_dim), dtype=np.float32)
+
         self._xyz = nn.Parameter(torch.tensor(xyz, dtype=torch.float, device="cuda").requires_grad_(True))
         self._features_dc = nn.Parameter(torch.tensor(features_dc, dtype=torch.float, device="cuda").transpose(1, 2).contiguous().requires_grad_(True))
         self._features_rest = nn.Parameter(torch.tensor(features_extra, dtype=torch.float, device="cuda").transpose(1, 2).contiguous().requires_grad_(True))
@@ -292,6 +314,7 @@ class GaussianModel:
         self._rotation = nn.Parameter(torch.tensor(rots, dtype=torch.float, device="cuda").requires_grad_(True))
         self._coefs = nn.Parameter(torch.tensor(coefs, dtype=torch.float, device="cuda").requires_grad_(True))
         self.active_sh_degree = self.max_sh_degree
+        self._specular_embedding = nn.Parameter(torch.tensor(spec_embed, dtype=torch.float, device="cuda").requires_grad_(True))
 
     def save_ply(self, path):
         mkdir_p(os.path.dirname(path))
@@ -304,15 +327,25 @@ class GaussianModel:
         scale = self._scaling.detach().cpu().numpy()
         coefs = self._coefs.detach().cpu().numpy()
         rotation = self._rotation.detach().cpu().numpy()
+        specular_embedding = self._specular_embedding.detach().cpu().numpy()
         
         dtype_full = [(attribute, 'f4') for attribute in self.construct_list_of_attributes()]
 
         elements = np.empty(xyz.shape[0], dtype=dtype_full)
-        attributes = np.concatenate((xyz, normals, f_dc, f_rest, opacities, scale, rotation, coefs), axis=1)
+        attributes = np.concatenate((xyz, normals, f_dc, f_rest, opacities, scale, rotation, coefs, specular_embedding), axis=1)
         elements[:] = list(map(tuple, attributes))
         el = PlyElement.describe(elements, 'vertex')
         PlyData([el]).write(path)
-        
+
+    def save_specular_mlp(self, path):
+        mkdir_p(os.path.dirname(path))
+        torch.save(self._specular_mlp.state_dict(), path)
+
+    def load_specular_mlp(self, path, map_location="cuda"):
+        state = torch.load(path, map_location=map_location)
+        self._specular_mlp.load_state_dict(state)
+        self._specular_mlp.to("cuda")
+                          
     def reset_opacity(self):
         opacities_new = inverse_sigmoid(torch.min(self.get_opacity, torch.ones_like(self.get_opacity)*0.01))
         optimizable_tensors = self.replace_tensor_to_optimizer(opacities_new, "opacity")
@@ -368,6 +401,8 @@ class GaussianModel:
         self.denom = self.denom[valid_points_mask]
         self.max_radii2D = self.max_radii2D[valid_points_mask]
 
+        self._specular_embedding = optimizable_tensors["specular_embedding"]
+
     def cat_tensors_to_optimizer(self, tensors_dict):
         optimizable_tensors = {}
         for group in self.optimizer.param_groups:
@@ -391,14 +426,15 @@ class GaussianModel:
 
         return optimizable_tensors
 
-    def densification_postfix(self, new_xyz, new_features_dc, new_features_rest, new_opacities, new_scaling, new_rotation, new_coefs, new_deformation_table):
+    def densification_postfix(self, new_xyz, new_features_dc, new_features_rest, new_opacities, new_scaling, new_rotation, new_coefs, new_deformation_table, new_specular_embedding):
         d = {"xyz": new_xyz,
             "f_dc": new_features_dc,
             "f_rest": new_features_rest,
             "opacity": new_opacities,
             "scaling" : new_scaling,
             "rotation" : new_rotation,
-            "coefs": new_coefs
+            "coefs": new_coefs,
+            "specular_embedding": new_specular_embedding
         }
 
         optimizable_tensors = self.cat_tensors_to_optimizer(d)
@@ -415,6 +451,8 @@ class GaussianModel:
         self._deformation_accum = torch.zeros((self.get_xyz.shape[0], 3), device="cuda")
         self.denom = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
         self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
+
+        self._specular_embedding = optimizable_tensors["specular_embedding"]
 
     def densify_and_split(self, grads, grad_threshold, scene_extent, N=2):
         n_init_points = self.get_xyz.shape[0]
@@ -438,7 +476,9 @@ class GaussianModel:
         new_opacity = self._opacity[selected_pts_mask].repeat(N,1)
         new_coefs = self._coefs[selected_pts_mask].repeat(N,1)
         new_deformation_table = self._deformation_table[selected_pts_mask].repeat(N)
-        self.densification_postfix(new_xyz, new_features_dc, new_features_rest, new_opacity, new_scaling, new_rotation, new_coefs,new_deformation_table)
+        new_specular_embedding = self._specular_embedding[selected_pts_mask].repeat(N, 1)
+        
+        self.densification_postfix(new_xyz, new_features_dc, new_features_rest, new_opacity, new_scaling, new_rotation, new_coefs,new_deformation_table, new_specular_embedding)
 
         prune_filter = torch.cat((selected_pts_mask, torch.zeros(N * selected_pts_mask.sum(), device="cuda", dtype=bool)))
         self.prune_points(prune_filter)
@@ -458,8 +498,9 @@ class GaussianModel:
         new_rotation = self._rotation[selected_pts_mask]
         new_coefs    = self._coefs[selected_pts_mask]
         new_deformation_table = self._deformation_table[selected_pts_mask]
+        new_specular_embedding = self._specular_embedding[selected_pts_mask]
 
-        self.densification_postfix(new_xyz, new_features_dc, new_features_rest, new_opacities, new_scaling, new_rotation,new_coefs, new_deformation_table)
+        self.densification_postfix(new_xyz, new_features_dc, new_features_rest, new_opacities, new_scaling, new_rotation,new_coefs, new_deformation_table, new_specular_embedding)
     
     def prune(self, max_grad, min_opacity, extent, max_screen_size):
         prune_mask = (self.get_opacity < min_opacity).squeeze()
