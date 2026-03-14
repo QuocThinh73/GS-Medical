@@ -97,7 +97,7 @@ class FDMHiddenParams(ParamGroup):
 class OptimizationParams(ParamGroup):
     def __init__(self, parser):
         self.dataloader=False
-        self.iterations = 30000
+        self.iterations = 10000
         self.position_lr_init = 0.00016
         self.position_lr_final = 0.0000016
         self.position_lr_delay_mult = 0.01
@@ -130,13 +130,14 @@ class OptimizationParams(ParamGroup):
         # losses params
         self.lambda_dssim = 0.2
         self.lambda_depth = 1.0
-        self.lambda_tv_image = 0.01
+        self.lambda_tv_image_inpaint = 0.01
+        self.lambda_tv_image_final = 0.01
         self.lambda_tv_depth = 0.01
         self.lambda_def_reg_pos = 0.5
         self.lambda_def_reg_cov = 0.0
         self.lambda_specular = 1.0
 
-        self.lambda_specular_start = 0
+        self.lambda_specular_start = 3000
 
         self.specular_embedding_lr = 0.01
         self.specular_mlp_lr = 0.0005
