@@ -137,9 +137,9 @@ class OptimizationParams(ParamGroup):
         self.lambda_def_reg_cov = 0.0
         self.lambda_specular = 1.0
 
-        self.lambda_specular_start = 3000
+        self.lambda_specular_start = 15000
 
-        self.specular_embedding_lr = 0.01
+        self.specular_embedding_lr = 0.001
         self.specular_mlp_lr = 0.0005
         
         super().__init__(parser, "Optimization Parameters")

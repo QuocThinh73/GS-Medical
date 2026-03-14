@@ -130,7 +130,6 @@ def training(dataset, hyper, opt, pipe, args):
         # specular_mask = 1.0 - specular_mask_raw
 
         L1_inpaint_images = l1_loss(inpaint_image, gt_inpaint_image, mask)
-        L1_specular_images = l1_loss(specular_image, gt_final_image - gt_inpaint_image, mask)
         L1_final_images = l1_loss(final_image, gt_final_image, mask)
 
         psnr_inpaint = psnr(inpaint_image, gt_inpaint_image, mask).mean().double()
@@ -143,6 +142,7 @@ def training(dataset, hyper, opt, pipe, args):
             loss += opt.lambda_dssim * L_dssim_inpaint
 
         if opt.lambda_specular != 0 and iteration > opt.lambda_specular_start:
+            L1_specular_images = l1_loss(specular_image, gt_final_image - gt_inpaint_image, mask)
             loss += opt.lambda_specular * L1_specular_images
         
         if opt.lambda_depth != 0 and viewpoint_cam.original_depth is not None:
@@ -160,7 +160,7 @@ def training(dataset, hyper, opt, pipe, args):
 
         if opt.lambda_tv_image_final != 0 and iteration > opt.lambda_specular_start:
             L_tv_final_image = TV_loss(final_image)
-            loss += opt.lambda_tv_image * L_tv_final_image
+            loss += opt.lambda_tv_image_final * L_tv_final_image
 
         if opt.lambda_tv_depth != 0:
             L_tv_depth = TV_loss(depth)
@@ -230,11 +230,11 @@ def training(dataset, hyper, opt, pipe, args):
                     f"PSNR inpaint: {psnr_inpaint:.2f}, "
                     f"PSNR final: {psnr_final:.2f}, "
                     f"Loss inpaint: {((1.0 - opt.lambda_dssim) * L1_inpaint_images).item():.7f}, "
-                    f"Loss specular: {(opt.lambda_specular * L1_specular_images).item():.7f}, "
+                    f"Loss specular: {(opt.lambda_specular * L1_specular_images).item() if opt.lambda_specular != 0 and iteration > opt.lambda_specular_start else 0:.7f}, "
                     f"L_dssim_inpaint: {(opt.lambda_dssim * L_dssim_inpaint).item() if opt.lambda_dssim != 0 else 0:.7f}, "
                     f"L_depth: {(opt.lambda_depth * L_depth).item() if opt.lambda_depth != 0 else 0:.7f}, "
-                    f"L_tv_inpaint_image: {(opt.lambda_tv_image_inpaint * L_tv_inpaint_image).item() if opt.lambda_tv_image != 0 else 0:.7f}, "
-                    f"L_tv_final_image: {(opt.lambda_tv_image_final * L_tv_final_image).item() if opt.lambda_tv_image != 0 else 0:.7f}, "
+                    f"L_tv_inpaint_image: {(opt.lambda_tv_image_inpaint * L_tv_inpaint_image).item() if opt.lambda_tv_image_inpaint != 0 else 0:.7f}, "
+                    f"L_tv_final_image: {(opt.lambda_tv_image_final * L_tv_final_image).item() if opt.lambda_tv_image_final != 0 and iteration > opt.lambda_specular_start else 0:.7f}, "
                     f"L_tv_depth: {(opt.lambda_tv_depth * L_tv_depth).item() if opt.lambda_tv_depth != 0 else 0:.7f}, "
                     f"L_def_reg_pos: {(opt.lambda_def_reg_pos * loss_pos).item() if opt.lambda_def_reg_pos != 0 else 0:.7f}, "
                     f"L_def_reg_cov: {(opt.lambda_def_reg_cov * loss_cov).item() if opt.lambda_def_reg_cov != 0 else 0:.7f}"
