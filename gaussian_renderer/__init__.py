@@ -15,7 +15,16 @@ from diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianR
 from scene.gaussian_model import GaussianModel
 from utils.sh_utils import eval_sh
 from utils.bsdf_utils import bsdf_pbr_specular, _safe_normalize
+from utils.graphics_utils import normal_from_depth_image
 
+
+def render_normal(viewpoint_cam, depth, alpha):
+    intrinsic_matrix, extrinsic_matrix = viewpoint_cam.get_calib_matrix_nerf()
+
+    normal_ref = normal_from_depth_image(depth, intrinsic_matrix.to(depth.device), extrinsic_matrix.to(depth.device))
+    normal_ref = normal_ref.permute(2,0,1)
+
+    return normal_ref
 
 def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, d_xyz, d_scales, d_rotations, iteration, opt, scaling_modifier = 1.0, override_color = None):
     """
@@ -105,8 +114,39 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
         "visibility_filter" : radii > 0,
         "radii": radii,
     }
+    
+    out_extras = {}
+
+    raster_settings_alpha = GaussianRasterizationSettings(
+        image_height=int(viewpoint_camera.image_height),
+        image_width=int(viewpoint_camera.image_width),
+        tanfovx=tanfovx,
+        tanfovy=tanfovy,
+        bg=torch.tensor([0,0,0], dtype=torch.float32, device="cuda"),
+        scale_modifier=scaling_modifier,
+        viewmatrix=viewpoint_camera.world_view_transform.cuda(),
+        projmatrix=viewpoint_camera.full_proj_transform.cuda(),
+        sh_degree=pc.active_sh_degree,
+        campos=viewpoint_camera.camera_center.cuda(),
+        prefiltered=False,
+        debug=pipe.debug,
+    )
+    rasterizer_alpha = GaussianRasterizer(raster_settings=raster_settings_alpha)
+    alpha = torch.ones_like(means3D) 
+    out_extras["alpha"] =  rasterizer_alpha(
+        means3D = means3D,
+        means2D = means2D,
+        shs = None,
+        colors_precomp = alpha,
+        opacities = opacity,
+        scales = scales,
+        rotations = rotations,
+        cov3D_precomp = cov3D_precomp)[0]
+    
+    out_extras["normal_ref"] = render_normal(viewpoint_cam=viewpoint_camera, depth=out['depth'][0], alpha=out_extras['alpha'][0])
 
     if iteration < opt.warmup:
+        out.update(out_extras)
         return out
     
     specular = pc.get_specular
@@ -128,9 +168,9 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
         cov3D_precomp = cov3D_precomp
     )[0]
 
-    out.update({
-        "render_final": final_image
-    })
+    out_extras["render_final"] = final_image
+
+    out.update(out_extras)
 
     return out
 

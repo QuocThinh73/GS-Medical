@@ -53,6 +53,7 @@ def render_set(model_path, name, opt, iteration, views, gaussians, pipeline, bac
     masks_path = os.path.join(model_path, name, "ours_{}".format(iteration), "masks")
     inpaint_path = os.path.join(model_path, name, "ours_{}".format(iteration), "inpaint")
     specular_mask_path = os.path.join(model_path, name, "ours_{}".format(iteration), "specular_masks")
+    normal_ref_path = os.path.join(model_path, name, "ours_{}".format(iteration), "normal_ref")
 
     makedirs(render_path, exist_ok=True)
     makedirs(render_inpaint_path, exist_ok=True)
@@ -62,6 +63,7 @@ def render_set(model_path, name, opt, iteration, views, gaussians, pipeline, bac
     makedirs(masks_path, exist_ok=True)
     makedirs(inpaint_path, exist_ok=True)
     makedirs(specular_mask_path, exist_ok=True)
+    makedirs(normal_ref_path, exist_ok=True)
     
     render_images = []
     render_inpaints = []
@@ -71,6 +73,7 @@ def render_set(model_path, name, opt, iteration, views, gaussians, pipeline, bac
     mask_list = []
     inpaints = []
     specular_masks = []
+    normal_refs = []
 
     for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
         stage = 'coarse' if no_fine else 'fine'
@@ -84,6 +87,7 @@ def render_set(model_path, name, opt, iteration, views, gaussians, pipeline, bac
 
         render_depths.append(rendering["depth"].cpu())
         render_inpaints.append(rendering["render_inpaint"].cpu())
+        normal_refs.append(rendering["normal_ref"].cpu())
 
         use_render_final = (iteration >= opt.warmup) and ("render_final" in rendering)
 
@@ -129,6 +133,13 @@ def render_set(model_path, name, opt, iteration, views, gaussians, pipeline, bac
     if len(inpaints) != 0:
         for image in tqdm(inpaints):
             torchvision.utils.save_image(image, os.path.join(inpaint_path, '{0:05d}'.format(count) + ".png"))
+            count+=1
+
+    count = 0
+    print("writing inpaint images.")
+    if len(normal_refs) != 0:
+        for image in tqdm(normal_refs):
+            torchvision.utils.save_image(image, os.path.join(normal_ref_path, '{0:05d}'.format(count) + ".png"))
             count+=1
 
     count = 0
@@ -264,7 +275,7 @@ if __name__ == "__main__":
     pipeline = PipelineParams(parser)
     hyperparam = FDMHiddenParams(parser)
     op = OptimizationParams(parser)
-    parser.add_argument("--iteration", default=5000, type=int)
+    parser.add_argument("--iteration", default=1000, type=int)
     parser.add_argument("--skip_train", action="store_true")
     parser.add_argument("--skip_test", action="store_true")
     parser.add_argument("--quiet", action="store_true")

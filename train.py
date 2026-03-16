@@ -142,7 +142,7 @@ def training(dataset, hyper, opt, pipe, args):
         L_dssim_inpaint = torch.tensor(0.0, device="cuda")
         L_dssim_final = torch.tensor(0.0, device="cuda")
 
-        if iteration <= opt.warmup:
+        if iteration < opt.warmup:
             # phase 1
             loss = (1.0 - opt.lambda_dssim) * L1_inpaint
 
@@ -307,7 +307,7 @@ def training(dataset, hyper, opt, pipe, args):
             if iteration < opt.densify_until_iter :
                 # Keep track of max radii in image-space for pruning
                 gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
-                gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
+                gaussians.add_densification_stats(viewspace_point_tensor.grad, visibility_filter)
 
                 opacity_threshold = opt.opacity_threshold_fine_init - iteration*(opt.opacity_threshold_fine_init - opt.opacity_threshold_fine_after)/(opt.densify_until_iter)  
                 densify_threshold = opt.densify_grad_threshold_fine_init - iteration*(opt.densify_grad_threshold_fine_init - opt.densify_grad_threshold_after)/(opt.densify_until_iter )  

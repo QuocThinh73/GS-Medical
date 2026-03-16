@@ -22,6 +22,7 @@ from utils.graphics_utils import BasicPointCloud
 from utils.general_utils import strip_symmetric, build_scaling_rotation, get_minimum_axis, flip_align_view
 from typing import Tuple
 from utils.sh_utils import eval_sh
+from utils.bsdf_utils import bsdf_pbr_specular, _safe_normalize
 
 
 class GaussianModel:
@@ -365,7 +366,7 @@ class GaussianModel:
         elements[:] = list(map(tuple, attributes))
         el = PlyElement.describe(elements, 'vertex')
         PlyData([el]).write(path)
-        
+
     def reset_opacity(self):
         opacities_new = inverse_sigmoid(torch.min(self.get_opacity, torch.ones_like(self.get_opacity)*0.01))
         optimizable_tensors = self.replace_tensor_to_optimizer(opacities_new, "opacity")
@@ -557,7 +558,6 @@ class GaussianModel:
         # print("origin deformation point nums:",self._deformation_table.sum())
         self._deformation_table = torch.gt(self._deformation_accum.max(dim=-1).values/100, threshold)
         
-    
     def gaussian_deformation(self, t, ch_num = 10, basis_num = 17):
         """
         Applies linear combination of learnable Gaussian basis functions to model the surface deformation.
