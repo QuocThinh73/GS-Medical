@@ -13,9 +13,20 @@ import torch
 import math
 from diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianRasterizer
 from scene.gaussian_model import GaussianModel
-from utils.sh_utils import eval_sh
+from utils.general_utils import safe_normalize
+from utils.graphics_utils import normal_from_depth_image
 
-def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, d_xyz, d_scales, d_rotations, scaling_modifier = 1.0, override_color = None):
+
+def render_normal(viewpoint_cam, depth, alpha):
+    intrinsic_matrix, extrinsic_matrix = viewpoint_cam.get_calib_matrix_nerf()
+
+    normal_ref = normal_from_depth_image(depth, intrinsic_matrix.to(depth.device), extrinsic_matrix.to(depth.device))
+    normal_ref = normal_ref
+    normal_ref = normal_ref.permute(2,0,1)
+
+    return normal_ref
+
+def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, d_xyz, d_scales, d_rotations, d_reflvec, iteration, opt, scaling_modifier = 1.0, override_color = None):
     """
     Render the scene. 
     
@@ -76,13 +87,19 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     # from SHs in Python, do it. If not, then SH -> RGB conversion will be done by rasterizer.
     shs = None
     colors_precomp = None
-    if override_color is None:
-        if pipe.convert_SHs_python:
-            shs_view = pc.get_features.transpose(1, 2).view(-1, 3, (pc.max_sh_degree+1)**2)
-            dir_pp = (means3D - viewpoint_camera.camera_center.cuda().repeat(pc.get_features.shape[0], 1))
-            dir_pp_normalized = dir_pp/dir_pp.norm(dim=1, keepdim=True)
-            sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
-            colors_precomp = torch.clamp_min(sh2rgb + 0.5, 0.0)
+    if iteration >= opt.warm_up + 3000:
+        gb_pos = pc.get_xyz + d_xyz # (N, 3) 
+        view_pos = viewpoint_camera.camera_center.to("cuda").repeat(pc.get_opacity.shape[0], 1) # (N, 3) 
+        d_viewdir_normalized = safe_normalize(view_pos - gb_pos)
+        deform_normal, _ = pc.get_normal(pc.get_scaling, pc.get_rotation, d_scales, d_rotations, d_viewdir_normalized) # (N, 3) 
+    
+    if colors_precomp is None:
+        if iteration >= opt.warm_up2:
+            diffuse   = pc.get_diffuse 
+            specular  = pc.get_specular 
+            roughness = pc.get_roughness 
+            color = pc.brdf_mlp.shade(gb_pos[None, None, ...].detach(), deform_normal[None, None, ...], d_reflvec[None, None, ...], diffuse[None, None, ...], specular[None, None, ...], roughness[None, None, ...], view_pos[None, None, ...])
+            colors_precomp = color.squeeze() 
         else:
             shs = pc.get_features
     else:
@@ -101,8 +118,69 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
 
     # Those Gaussians that were frustum culled or had a radius of 0 were not visible.
     # They will be excluded from value updates used in the splitting criteria.
-    return {"render": rendered_image,
-            "depth": depth,
-            "viewspace_points": screenspace_points,
-            "visibility_filter" : radii > 0,
-            "radii": radii,}
+    rendered_image = rendered_image.clamp(0, 1)
+    out = {
+        "render": rendered_image,
+        "viewspace_points": screenspace_points,
+        "visibility_filter" : (radii > 0).nonzero(),
+        "radii": radii,
+        }
+    
+    if iteration >= opt.warm_up + 3000:
+        p_hom = torch.cat([pc.get_xyz + d_xyz, torch.ones_like(pc.get_xyz[..., :1])], -1).unsqueeze(-1)
+        p_view = torch.matmul(viewpoint_camera.world_view_transform.to("cuda").transpose(0,1), p_hom)
+        p_view = p_view[..., :3, :]
+        depth = p_view.squeeze()[..., 2:3]
+        depth = depth.repeat(1, 3)
+        render_extras = {"depth": depth}
+        normal_normed = 0.5 * deform_normal + 0.5  
+        render_extras.update({"normal": normal_normed})
+    
+        out_extras = {}
+        for k in render_extras.keys():
+            if render_extras[k] is None: continue
+            image = rasterizer(
+                means3D = means3D,
+                means2D = means2D,
+                shs = None,
+                colors_precomp = render_extras[k],
+                opacities = opacity,
+                scales = scales,
+                rotations = rotations,
+                cov3D_precomp = cov3D_precomp)[0]
+            out_extras[k] = image       
+        for k in ["normal"]:
+            if k in out_extras.keys():
+                out_extras[k] = (out_extras[k] - 0.5) * 2. 
+                torch.nn.functional.normalize(out_extras[k], p=2, dim=0)
+        
+        raster_settings_alpha = GaussianRasterizationSettings(
+            image_height=int(viewpoint_camera.image_height),
+            image_width=int(viewpoint_camera.image_width),
+            tanfovx=tanfovx,
+            tanfovy=tanfovy,
+            bg=torch.tensor([0,0,0], dtype=torch.float32, device="cuda"),
+            scale_modifier=scaling_modifier,
+            viewmatrix=viewpoint_camera.world_view_transform.cuda(),
+            projmatrix=viewpoint_camera.full_proj_transform.cuda(),
+            sh_degree=pc.active_sh_degree,
+            campos=viewpoint_camera.camera_center.cuda(),
+            prefiltered=False,
+            debug=pipe.debug,
+        )
+        rasterizer_alpha = GaussianRasterizer(raster_settings=raster_settings_alpha)
+        alpha = torch.ones_like(means3D) 
+        out_extras["alpha"] =  rasterizer_alpha(
+            means3D = means3D,
+            means2D = means2D,
+            shs = None,
+            colors_precomp = alpha,
+            opacities = opacity,
+            scales = scales,
+            rotations = rotations,
+            cov3D_precomp = cov3D_precomp)[0]
+        
+        out_extras["normal_ref"] = render_normal(viewpoint_cam=viewpoint_camera, depth=out_extras['depth'][0], alpha=out_extras['alpha'][0])
+        out.update(out_extras)
+
+    return out

@@ -57,6 +57,8 @@ class ModelParams(ParamGroup):
         self.render_process=False
         self.extra_mark = None
         self.camera_extent = None
+        self.brdf_envmap_res = 128
+        self.t_multires = 6
         super().__init__(parser, "Loading Parameters", sentinel)
 
     def extract(self, args):
@@ -98,7 +100,7 @@ class OptimizationParams(ParamGroup):
         self.position_lr_init = 0.00016
         self.position_lr_final = 0.0000016
         self.position_lr_delay_mult = 0.01
-        self.position_lr_max_steps = 40_000
+        self.position_lr_max_steps = 30_000
         self.deformation_lr_init = 0.00016
         self.deformation_lr_final = 0.000016
         self.deformation_lr_delay_mult = 0.01
@@ -114,7 +116,7 @@ class OptimizationParams(ParamGroup):
         self.opacity_reset_interval = 3000
         self.densification_interval = 100
         self.densify_from_iter = 500
-        self.densify_until_iter = 40000
+        self.densify_until_iter = 18_000
         self.densify_grad_threshold_coarse = 0.0002
         self.densify_grad_threshold_fine_init = 0.0002
         self.densify_grad_threshold_after = 0.0002
@@ -131,6 +133,20 @@ class OptimizationParams(ParamGroup):
         self.lambda_tv_depth = 0.01
         self.lambda_def_reg_pos = 0.5
         self.lambda_def_reg_cov = 0.0
+
+        self.brdf_mlp_lr_init = 1.6e-2
+        self.brdf_mlp_lr_final = 1.6e-4 
+        self.brdf_mlp_lr_delay_mult = 0.01
+        self.brdf_mlp_lr_max_steps = 40_000
+        self.normal_lr = 0.0002
+        self.specular_lr = 0.0002
+        self.roughness_lr = 0.0002
+        self.lambda_normal = 0.01
+        self.lambda_env = 0.001
+
+        self.warm_up = 3000
+        self.warm_up2 = 9000
+        self.warm_up3 = 15000
         
         super().__init__(parser, "Optimization Parameters")
 

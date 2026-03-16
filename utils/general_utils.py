@@ -16,6 +16,19 @@ import numpy as np
 import random
 import cv2
 
+
+def dot(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    return torch.sum(x*y, -1, keepdim=True)
+
+def reflect(x: torch.Tensor, n: torch.Tensor) -> torch.Tensor:
+    return 2*dot(x, n)*n - x
+
+def length(x: torch.Tensor, eps: float =1e-20) -> torch.Tensor:
+    return torch.sqrt(torch.clamp(dot(x,x), min=eps)) # Clamp to avoid nan gradients because grad(sqrt(0)) = NaN
+
+def safe_normalize(x: torch.Tensor, eps: float =1e-20) -> torch.Tensor:
+    return x / length(x, eps)
+
 def inpaint_rgb(rgb_image, mask):
     # Convert mask to uint8
     mask_uint8 = (mask * 255).astype(np.uint8)
@@ -165,3 +178,59 @@ def cdist(x, y):
     y_norm = y.pow(2).sum(dim=1, keepdim=True)
     res = torch.addmm(y_norm.transpose(-2, -1), x, y.transpose(-2, -1), alpha=-2).add_(x_norm)
     return res.clamp_min_(1e-30).sqrt_()
+
+def get_minimum_axis(scales, rotations):
+    sorted_idx = torch.argsort(scales, descending=False, dim=-1)
+    R = build_rotation(rotations)
+    R_sorted = torch.gather(R, dim=2, index=sorted_idx[:,None,:].repeat(1, 3, 1)).squeeze()
+    return R_sorted[:,:,0] 
+
+def get_maximum_axis(scales, rotations):
+    sorted_idx = torch.argsort(scales, descending=True, dim=-1)  
+    R = build_rotation(rotations)
+    R_sorted = torch.gather(R, dim=2, index=sorted_idx[:,None,:].repeat(1, 3, 1)).squeeze()
+    return R_sorted[:,:,0]  
+
+def flip_align_view(normal, viewdir):
+    dotprod = torch.sum(
+        normal * viewdir, dim=-1, keepdims=True) 
+    non_flip = dotprod>=0 
+    normal_flipped = normal*torch.where(non_flip, 1, -1) 
+    return normal_flipped
+
+def is_parallel(v1, v2):
+    cross_product = torch.cross(v1, v2, dim=1)
+    return torch.all(cross_product == 0, dim=1)
+
+def calculate_rotation_matrix(u1, u2, v1, v2):
+    u1 = u1 / u1.norm(dim=1, keepdim=True)
+    u2 = u2 / u2.norm(dim=1, keepdim=True)
+    v1 = v1 / v1.norm(dim=1, keepdim=True)
+    v2 = v2 / v2.norm(dim=1, keepdim=True)
+
+    u3 = torch.cross(u1, u2, dim=1)
+    v3 = torch.cross(v1, v2, dim=1)
+
+    U = torch.stack([u1, u2, u3], dim=2)
+    V = torch.stack([v1, v2, v3], dim=2)
+
+    R = torch.matmul(V, U.transpose(1, 2))
+    return R
+
+def calculate_flattening(axes):
+    sorted_axes, _ = torch.sort(axes, dim=1, descending=True)
+    a = sorted_axes[:, 0]
+    c = sorted_axes[:, 2]
+    
+    return (a - c) / a
+
+def calculate_eccentricities(axes):
+    sorted_axes, _ = torch.sort(axes, dim=1, descending=True)
+    a = sorted_axes[:, 0]  
+    b = sorted_axes[:, 1]  
+    c = sorted_axes[:, 2]  
+    
+    eccentricity_ac = torch.sqrt(1 - (c**2 / a**2))
+    eccentricity_ac = eccentricity_ac ** 5
+    
+    return eccentricity_ac

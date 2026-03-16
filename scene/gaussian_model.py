@@ -19,8 +19,10 @@ from plyfile import PlyData, PlyElement
 from utils.sh_utils import RGB2SH
 from simple_knn._C import distCUDA2
 from utils.graphics_utils import BasicPointCloud
-from utils.general_utils import strip_symmetric, build_scaling_rotation
+from utils.general_utils import strip_symmetric, build_scaling_rotation, get_minimum_axis, get_maximum_axis, flip_align_view, calculate_rotation_matrix, calculate_flattening
 from typing import Tuple
+from utils.sh_utils import eval_sh
+from scene.NVDIFFREC import create_trainable_env_rnd
 
 
 class GaussianModel:
@@ -42,7 +44,11 @@ class GaussianModel:
 
         self.rotation_activation = torch.nn.functional.normalize
 
-    def __init__(self, sh_degree : int, args):
+        self.diffuse_activation = torch.sigmoid
+        self.specular_activation = torch.sigmoid
+        self.roughness_activation = torch.sigmoid
+
+    def __init__(self, sh_degree : int, brdf_envmap_res: int, args):
         self.active_sh_degree = 0
         self.max_sh_degree = sh_degree
         self._xyz = torch.empty(0)
@@ -62,6 +68,17 @@ class GaussianModel:
         self.optimizer = None
         self.percent_dense = 0
         self.spatial_lr_scale = 0
+
+        # brdf setting
+        self.brdf_envmap_res = brdf_envmap_res  
+        self._specular = torch.empty(0)
+        self._roughness = torch.empty(0)
+        self._normal = torch.empty(0)
+
+        self.brdf_mlp = create_trainable_env_rnd(self.brdf_envmap_res, scale=0.0, bias=0.8)
+        self.roughness_bias = 0.
+        self.default_roughness = 0.6
+
         self.setup_functions()
 
     def capture(self):
@@ -125,6 +142,42 @@ class GaussianModel:
         return torch.cat((features_dc, features_rest), dim=1)
     
     @property
+    def get_diffuse(self):
+        return eval_sh(0, self._features_dc.transpose(1, 2), None)
+    
+    @property
+    def get_specular(self):
+        return self.specular_activation(self._specular)
+    
+    @property
+    def get_roughness(self):
+        return self.roughness_activation(self._roughness + self.roughness_bias)
+    
+    @property
+    def get_delta_normal(self):
+        return self._normal
+    
+    @property
+    def get_brdf_features(self):
+        return self._features_rest
+    
+    def get_normal(self, scales, rotations, d_scales, d_rotations, d_viewdir):
+        c_short_axis = get_minimum_axis(scales, rotations)
+        d_short_axis = get_minimum_axis(torch.abs(scales + d_scales), rotations + d_rotations)
+        c_short_axis = flip_align_view(c_short_axis, d_short_axis)
+        d_short_axis = flip_align_view(d_short_axis, c_short_axis)
+        c_long_axis = get_maximum_axis(scales, rotations)
+        d_long_axis = get_maximum_axis(torch.abs(scales + d_scales), rotations + d_rotations)
+        c_long_axis = flip_align_view(c_long_axis, d_long_axis)
+        d_long_axis = flip_align_view(d_long_axis, c_long_axis)
+        rotation_matrix = calculate_rotation_matrix(c_short_axis, c_long_axis, d_short_axis, d_long_axis)
+        deform_delta_normal = (calculate_flattening(torch.abs(scales)).unsqueeze(-1) / calculate_flattening(torch.abs(scales + d_scales)).unsqueeze(-1)) * torch.matmul(rotation_matrix, self.get_delta_normal.unsqueeze(-1)).squeeze(-1)
+        deform_delta_normal = torch.matmul(rotation_matrix, self.get_delta_normal.unsqueeze(-1)).squeeze(-1)        
+        normal = flip_align_view(deform_delta_normal + d_short_axis, d_viewdir)
+        normal = normal/normal.norm(dim=1, keepdim=True) # (N, 3)
+        return normal, deform_delta_normal
+    
+    @property
     def get_opacity(self):
         return self.opacity_activation(self._opacity)
     
@@ -161,6 +214,7 @@ class GaussianModel:
         self._coefs = nn.Parameter(_coefs.requires_grad_(True))
         
         opacities = inverse_sigmoid(0.1 * torch.ones((fused_point_cloud.shape[0], 1), dtype=torch.float, device="cuda"))
+        normals = np.zeros_like(np.asarray(pcd.points, dtype=np.float32))
 
         self._xyz = nn.Parameter(fused_point_cloud.requires_grad_(True))
         self._features_dc = nn.Parameter(features[:,:,0:1].transpose(1, 2).contiguous().requires_grad_(True))
@@ -170,6 +224,9 @@ class GaussianModel:
         self._opacity = nn.Parameter(opacities.requires_grad_(True))
         self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
         self._deformation_table = torch.gt(torch.ones((self.get_xyz.shape[0]),device="cuda"),0)
+        self._normal = nn.Parameter(torch.from_numpy(normals).to(self._xyz.device).requires_grad_(True))
+        self._specular = nn.Parameter(torch.zeros((fused_point_cloud.shape[0], 3), device="cuda").requires_grad_(True))
+        self._roughness = nn.Parameter(self.default_roughness*torch.ones((fused_point_cloud.shape[0], 1), device="cuda").requires_grad_(True))
 
         print("Finished creating Gaussian model from point cloud.")
     
@@ -186,7 +243,11 @@ class GaussianModel:
             {'params': [self._opacity], 'lr': training_args.opacity_lr, "name": "opacity"},
             {'params': [self._scaling], 'lr': training_args.scaling_lr, "name": "scaling"},
             {'params': [self._rotation], 'lr': training_args.rotation_lr, "name": "rotation"},
-            {'params': [self._coefs], 'lr': training_args.deformation_lr_init * self.spatial_lr_scale, "name": "coefs"}
+            {'params': [self._coefs], 'lr': training_args.deformation_lr_init * self.spatial_lr_scale, "name": "coefs"},
+            {'params': list(self.brdf_mlp.parameters()), 'lr': training_args.brdf_mlp_lr_init, "name": "brdf_mlp"},
+            {'params': [self._roughness], 'lr': training_args.roughness_lr, "name": "roughness"},
+            {'params': [self._normal], 'lr': training_args.normal_lr, "name": "normal"},
+            {'params': [self._specular], 'lr': training_args.specular_lr, "name": "specular"},
         ]
 
         self.optimizer = torch.optim.Adam(l, lr=0.0, eps=1e-15)
@@ -198,7 +259,21 @@ class GaussianModel:
         self.deformation_scheduler_args = get_expon_lr_func(lr_init=training_args.deformation_lr_init*self.spatial_lr_scale,
                                                     lr_final=training_args.deformation_lr_final*self.spatial_lr_scale,
                                                     lr_delay_mult=training_args.deformation_lr_delay_mult,
-                                                    max_steps=training_args.position_lr_max_steps) 
+                                                    max_steps=training_args.position_lr_max_steps)
+        self.brdf_mlp_scheduler_args = get_expon_lr_func(lr_init=training_args.brdf_mlp_lr_init,
+                                        lr_final=training_args.brdf_mlp_lr_final,
+                                        lr_delay_mult=training_args.brdf_mlp_lr_delay_mult,
+                                        max_steps=training_args.brdf_mlp_lr_max_steps)
+
+    def _update_learning_rate(self, iteration, param):
+        for param_group in self.optimizer.param_groups:
+            if param_group["name"] == param:
+                try:
+                    lr = getattr(self, f"{param}_scheduler_args", self.brdf_mlp_scheduler_args)(iteration)
+                    param_group['lr'] = lr
+                    return lr
+                except AttributeError:
+                    pass
 
     def update_learning_rate(self, iteration):
         ''' Learning rate scheduling per step '''
@@ -210,10 +285,12 @@ class GaussianModel:
             if param_group["name"] == "coefs":
                 lr = self.deformation_scheduler_args(iteration)
                 param_group['lr'] = lr
-            elif param_group["name"] == "deformation":
+            if param_group["name"] == "deformation":
                 lr = self.deformation_scheduler_args(iteration)
                 param_group['lr'] = lr
                 # return lr
+            if param_group["name"] in ["brdf_mlp","roughness","specular","normal"]:
+                lr = self._update_learning_rate(iteration, param_group)
 
     def construct_list_of_attributes(self):
         l = ['x', 'y', 'z', 'nx', 'ny', 'nz']
@@ -229,6 +306,9 @@ class GaussianModel:
             l.append('rot_{}'.format(i))
         for i in range(self._coefs.shape[1]):
             l.append('coefs_{}'.format(i))
+        l.append('roughness')
+        for i in range(self._specular.shape[1]):
+            l.append('specular{}'.format(i))
         return l
 
     def load_model(self, path):
@@ -284,6 +364,16 @@ class GaussianModel:
         for idx, attr_name in enumerate(coef_names):
             coefs[:, idx] = np.asarray(plydata.elements[0][attr_name])
 
+        roughness = np.asarray(plydata.elements[0]["roughness"])[..., np.newaxis]
+
+        specular_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("specular")]
+        specular = np.zeros((xyz.shape[0], len(specular_names)))
+        for idx, attr_name in enumerate(specular_names):
+            specular[:, idx] = np.asarray(plydata.elements[0][attr_name])
+        normal = np.stack((np.asarray(plydata.elements[0]["nx"]),
+                            np.asarray(plydata.elements[0]["ny"]),
+                            np.asarray(plydata.elements[0]["nz"])),  axis=1)
+
         self._xyz = nn.Parameter(torch.tensor(xyz, dtype=torch.float, device="cuda").requires_grad_(True))
         self._features_dc = nn.Parameter(torch.tensor(features_dc, dtype=torch.float, device="cuda").transpose(1, 2).contiguous().requires_grad_(True))
         self._features_rest = nn.Parameter(torch.tensor(features_extra, dtype=torch.float, device="cuda").transpose(1, 2).contiguous().requires_grad_(True))
@@ -291,24 +381,30 @@ class GaussianModel:
         self._scaling = nn.Parameter(torch.tensor(scales, dtype=torch.float, device="cuda").requires_grad_(True))
         self._rotation = nn.Parameter(torch.tensor(rots, dtype=torch.float, device="cuda").requires_grad_(True))
         self._coefs = nn.Parameter(torch.tensor(coefs, dtype=torch.float, device="cuda").requires_grad_(True))
+        self._roughness = nn.Parameter(torch.tensor(roughness, dtype=torch.float, device="cuda").requires_grad_(True))
+        self._specular = nn.Parameter(torch.tensor(specular, dtype=torch.float, device="cuda").requires_grad_(True))
+        self._normal = nn.Parameter(torch.tensor(normal, dtype=torch.float, device="cuda").requires_grad_(True))
+
         self.active_sh_degree = self.max_sh_degree
 
     def save_ply(self, path):
         mkdir_p(os.path.dirname(path))
 
         xyz = self._xyz.detach().cpu().numpy()
-        normals = np.zeros_like(xyz)
+        normals = self._normal.detach().cpu().numpy()
         f_dc = self._features_dc.detach().transpose(1, 2).flatten(start_dim=1).contiguous().cpu().numpy()
         f_rest = self._features_rest.detach().transpose(1, 2).flatten(start_dim=1).contiguous().cpu().numpy()
         opacities = self._opacity.detach().cpu().numpy()
         scale = self._scaling.detach().cpu().numpy()
         coefs = self._coefs.detach().cpu().numpy()
         rotation = self._rotation.detach().cpu().numpy()
+        roughness = self._roughness.detach().cpu().numpy()
+        specular = self._specular.detach().cpu().numpy()
         
         dtype_full = [(attribute, 'f4') for attribute in self.construct_list_of_attributes()]
 
         elements = np.empty(xyz.shape[0], dtype=dtype_full)
-        attributes = np.concatenate((xyz, normals, f_dc, f_rest, opacities, scale, rotation, coefs), axis=1)
+        attributes = np.concatenate((xyz, normals, f_dc, f_rest, opacities, scale, rotation, coefs, roughness, specular), axis=1)
         elements[:] = list(map(tuple, attributes))
         el = PlyElement.describe(elements, 'vertex')
         PlyData([el]).write(path)
@@ -321,6 +417,8 @@ class GaussianModel:
     def replace_tensor_to_optimizer(self, tensor, name):
         optimizable_tensors = {}
         for group in self.optimizer.param_groups:
+            if group["name"] == "brdf_mlp":
+                continue
             if group["name"] == name:
                 stored_state = self.optimizer.state.get(group['params'][0], None)
                 stored_state["exp_avg"] = torch.zeros_like(tensor)
@@ -337,6 +435,8 @@ class GaussianModel:
         optimizable_tensors = {}
         for group in self.optimizer.param_groups:
             if len(group["params"]) > 1:
+                continue
+            if group["name"] == "brdf_mlp":
                 continue
             stored_state = self.optimizer.state.get(group['params'][0], None)
             if stored_state is not None:
@@ -362,6 +462,9 @@ class GaussianModel:
         self._scaling = optimizable_tensors["scaling"]
         self._rotation = optimizable_tensors["rotation"]
         self._coefs = optimizable_tensors["coefs"]
+        self._roughness = optimizable_tensors["roughness"]
+        self._specular = optimizable_tensors["specular"]
+        self._normal = optimizable_tensors["normal"]
         self._deformation_accum = self._deformation_accum[valid_points_mask]
         self.xyz_gradient_accum = self.xyz_gradient_accum[valid_points_mask]
         self._deformation_table = self._deformation_table[valid_points_mask]
@@ -371,6 +474,8 @@ class GaussianModel:
     def cat_tensors_to_optimizer(self, tensors_dict):
         optimizable_tensors = {}
         for group in self.optimizer.param_groups:
+            if group["name"] == "brdf_mlp":
+                continue
             if len(group["params"])>1 or group["name"]=='deformation':
                 continue
             assert len(group["params"]) == 1
@@ -391,14 +496,17 @@ class GaussianModel:
 
         return optimizable_tensors
 
-    def densification_postfix(self, new_xyz, new_features_dc, new_features_rest, new_opacities, new_scaling, new_rotation, new_coefs, new_deformation_table):
+    def densification_postfix(self, new_xyz, new_features_dc, new_features_rest, new_opacities, new_scaling, new_rotation, new_coefs, new_deformation_table, new_roughness, new_specular, new_normal):
         d = {"xyz": new_xyz,
             "f_dc": new_features_dc,
             "f_rest": new_features_rest,
             "opacity": new_opacities,
             "scaling" : new_scaling,
             "rotation" : new_rotation,
-            "coefs": new_coefs
+            "coefs": new_coefs,
+            "roughness": new_roughness,
+            "specular" : new_specular,
+            "normal" : new_normal
         }
 
         optimizable_tensors = self.cat_tensors_to_optimizer(d)
@@ -409,6 +517,9 @@ class GaussianModel:
         self._scaling = optimizable_tensors["scaling"]
         self._rotation = optimizable_tensors["rotation"]
         self._coefs = optimizable_tensors["coefs"]
+        self._roughness = optimizable_tensors["roughness"]
+        self._specular = optimizable_tensors["specular"]
+        self._normal = optimizable_tensors["normal"]
         
         self._deformation_table = torch.cat([self._deformation_table,new_deformation_table],-1)
         self.xyz_gradient_accum = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
@@ -437,12 +548,14 @@ class GaussianModel:
         new_features_rest = self._features_rest[selected_pts_mask].repeat(N,1,1)
         new_opacity = self._opacity[selected_pts_mask].repeat(N,1)
         new_coefs = self._coefs[selected_pts_mask].repeat(N,1)
+        new_roughness = self._roughness[selected_pts_mask].repeat(N,1)
+        new_specular = self._specular[selected_pts_mask].repeat(N,1)
+        new_normal = self._normal[selected_pts_mask].repeat(N,1)
         new_deformation_table = self._deformation_table[selected_pts_mask].repeat(N)
-        self.densification_postfix(new_xyz, new_features_dc, new_features_rest, new_opacity, new_scaling, new_rotation, new_coefs,new_deformation_table)
+        self.densification_postfix(new_xyz, new_features_dc, new_features_rest, new_opacity, new_scaling, new_rotation, new_coefs, new_deformation_table, new_roughness, new_specular, new_normal)
 
         prune_filter = torch.cat((selected_pts_mask, torch.zeros(N * selected_pts_mask.sum(), device="cuda", dtype=bool)))
         self.prune_points(prune_filter)
-
 
     def densify_and_clone(self, grads, grad_threshold, scene_extent):
         # Extract points that satisfy the gradient condition
@@ -457,9 +570,12 @@ class GaussianModel:
         new_scaling = self._scaling[selected_pts_mask]
         new_rotation = self._rotation[selected_pts_mask]
         new_coefs    = self._coefs[selected_pts_mask]
+        new_roughness = self._roughness[selected_pts_mask] 
+        new_specular = self._specular[selected_pts_mask] 
+        new_normal = self._normal[selected_pts_mask]
         new_deformation_table = self._deformation_table[selected_pts_mask]
 
-        self.densification_postfix(new_xyz, new_features_dc, new_features_rest, new_opacities, new_scaling, new_rotation,new_coefs, new_deformation_table)
+        self.densification_postfix(new_xyz, new_features_dc, new_features_rest, new_opacities, new_scaling, new_rotation,new_coefs, new_deformation_table, new_roughness, new_specular, new_normal)
     
     def prune(self, max_grad, min_opacity, extent, max_screen_size):
         prune_mask = (self.get_opacity < min_opacity).squeeze()
@@ -478,9 +594,19 @@ class GaussianModel:
         self.densify_and_clone(grads, max_grad, extent)
         self.densify_and_split(grads, max_grad, extent)
 
+        # prune_mask = (self.get_opacity < min_opacity).squeeze()
+        # if max_screen_size:
+        #     big_points_vs = self.max_radii2D > max_screen_size
+        #     big_points_ws = self.get_scaling.max(dim=1).values > 0.1 * extent
+        #     prune_mask = torch.logical_or(torch.logical_or(prune_mask, big_points_vs), big_points_ws)
+        # self.prune_points(prune_mask)
+
     def add_densification_stats(self, viewspace_point_tensor, update_filter):
         self.xyz_gradient_accum[update_filter] += torch.norm(viewspace_point_tensor[update_filter,:2], dim=-1, keepdim=True)
         self.denom[update_filter] += 1
+
+    def set_requires_grad(self, attrib_name, state: bool):
+        getattr(self, f"_{attrib_name}").requires_grad = state
 
     @torch.no_grad()
     def update_deformation_table(self,threshold):

@@ -11,6 +11,7 @@
 
 import numpy as np
 import torch
+import cv2
 
 
 def tensor2array(tensor):
@@ -49,3 +50,9 @@ def rmse(a, b, mask):
     rmse = (((a - b)**2 * mask).sum() / (mask_sum))**0.5
     return rmse
 
+def erode(img_in, erode_size=4):
+    img_out = np.copy(img_in)
+    kernel = np.ones((erode_size, erode_size), np.uint8)
+    img_out = cv2.erode(img_out, kernel, iterations=1)
+
+    return img_out

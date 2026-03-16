@@ -1,6 +1,8 @@
 ModelParams = dict(
     extra_mark = 'endonerf',
-    camera_extent = 10
+    camera_extent = 10,
+    brdf_envmap_res = 128,
+    t_multires = 6
 )
 
 OptimizationParams = dict(
@@ -11,12 +13,10 @@ OptimizationParams = dict(
     iterations = 40_000,
     percent_dense = 0.01,
     opacity_reset_interval = 3000,
-    position_lr_max_steps = 40_000,
-    prune_interval = 3000
+    position_lr_max_steps = 40_000
 )
 
 ModelHiddenParams = dict(
     curve_num = 17, # number of learnable basis functions. This number was set to 17 for all the experiments in paper (https://arxiv.org/abs/2405.17835)
-
     ch_num = 10, # channel number of deformable attributes: 10 = 3 (scale) + 3 (mean) + 4 (rotation)
     init_param = 0.01, )

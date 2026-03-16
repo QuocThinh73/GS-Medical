@@ -17,9 +17,9 @@ from tqdm import tqdm
 from os import makedirs
 from gaussian_renderer import render
 import torchvision
-from utils.general_utils import safe_state
+from utils.general_utils import safe_state, safe_normalize, reflect
 from argparse import ArgumentParser
-from arguments import ModelParams, PipelineParams, get_combined_args, FDMHiddenParams
+from arguments import ModelParams, PipelineParams, get_combined_args, FDMHiddenParams, OptimizationParams
 from scene.gaussian_model import GaussianModel
 from time import time
 import open3d as o3d
@@ -27,7 +27,7 @@ from utils.graphics_utils import fov2focal
 import cv2
 from PIL import Image, ImageDraw
 import re
-
+from scene.deform_model import DeformEnvModel
 
 def generate_video(imgs_path, text_to_add = ''):
 
@@ -44,7 +44,7 @@ def generate_video(imgs_path, text_to_add = ''):
         writer.append_data(np.array(img))
     writer.close()
 
-def render_set(model_path, name, iteration, views, gaussians, pipeline, background,\
+def render_set(model_path, opt, name, iteration, views, gaussians, pipeline, background, deform_env,\
     no_fine, render_test=False, reconstruct=False, crop_size=0):
     render_path = os.path.join(model_path, name, "ours_{}".format(iteration), "renders")
     depth_path = os.path.join(model_path, name, "ours_{}".format(iteration), "depth")
@@ -74,7 +74,18 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
         stage = 'coarse' if no_fine else 'fine'
         ori_time = torch.tensor(view.time).to(gaussians.get_xyz.device)
         d_xyz, d_scales, d_rotations = gaussians.deformation(ori_time)
-        rendering = render(view, gaussians, pipeline, background, d_xyz, d_scales, d_rotations)
+        gb_pos = gaussians.get_xyz + d_xyz 
+        view_pos = view.camera_center.repeat(gaussians.get_opacity.shape[0], 1) 
+        d_viewdir_normalized = safe_normalize(view_pos - gb_pos)
+        normal, deform_delta_normal = gaussians.get_normal(gaussians.get_scaling, gaussians.get_rotation, d_scales, d_rotations, d_viewdir_normalized)
+        reflvec = safe_normalize(reflect(d_viewdir_normalized, normal))
+        ori_time = torch.as_tensor(
+            view.time,
+            device=reflvec.device,
+            dtype=reflvec.dtype
+        ).view(1, 1).expand(reflvec.shape[0], 1)
+        d_reflvec = deform_env.step(reflvec.detach(), ori_time)
+        rendering = render(view, gaussians, pipeline, background, d_xyz, d_scales, d_rotations, d_reflvec, iteration, opt)
         render_depths.append(rendering["depth"].cpu())
         render_images.append(rendering["render"].cpu())
         if name in ["train", "test", "video"]:
@@ -171,20 +182,23 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
         print('file name:', name)
         reconstruct_point_cloud(render_images, mask_list, render_depths, camera_parameters, name, model_path, crop_size)
 
-def render_sets(dataset : ModelParams, hyperparam, iteration : int, pipeline : PipelineParams, skip_train : bool, skip_test : bool, skip_video: bool, reconstruct_train: bool, reconstruct_test: bool, reconstruct_video: bool):
+def render_sets(dataset : ModelParams, opt: OptimizationParams, hyperparam, iteration : int, pipeline : PipelineParams, skip_train : bool, skip_test : bool, skip_video: bool, reconstruct_train: bool, reconstruct_test: bool, reconstruct_video: bool):
     with torch.no_grad():
-        gaussians = GaussianModel(dataset.sh_degree, hyperparam)
+        gaussians = GaussianModel(dataset.sh_degree, dataset.brdf_envmap_res, hyperparam)
         scene = Scene(dataset, gaussians, load_iteration=iteration)
+
+        deform_env = DeformEnvModel(dataset.t_multires)
+        deform_env.load_weights(dataset.model_path)
 
         bg_color = [1,1,1] if dataset.white_background else [0, 0, 0]
         background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
         
         if not skip_train:
-            render_set(dataset.model_path, "train", scene.loaded_iter, scene.getTrainCameras(), gaussians, pipeline, background, False, reconstruct=reconstruct_train)
+            render_set(dataset.model_path, opt, "train", scene.loaded_iter, scene.getTrainCameras(), gaussians, pipeline, background, deform_env, False, reconstruct=reconstruct_train)
         if not skip_test:
-            render_set(dataset.model_path, "test", scene.loaded_iter, scene.getTestCameras(), gaussians, pipeline, background, False, reconstruct=reconstruct_test, crop_size=20)
+            render_set(dataset.model_path, opt, "test", scene.loaded_iter, scene.getTestCameras(), gaussians, pipeline, background, deform_env, False, reconstruct=reconstruct_test, crop_size=20)
         if not skip_video:
-            render_set(dataset.model_path,"video",scene.loaded_iter, scene.getVideoCameras(),gaussians,pipeline,background, False, render_test=True, reconstruct=reconstruct_video, crop_size=20)
+            render_set(dataset.model_path, opt, "video", scene.loaded_iter, scene.getVideoCameras(), gaussians, pipeline, background, deform_env, False, render_test=True, reconstruct=reconstruct_video, crop_size=20)
 
 def reconstruct_point_cloud(images, masks, depths, camera_parameters, name, model_path, crop_left_size=0):
     import cv2
@@ -241,7 +255,8 @@ if __name__ == "__main__":
     model = ModelParams(parser, sentinel=True)
     pipeline = PipelineParams(parser)
     hyperparam = FDMHiddenParams(parser)
-    parser.add_argument("--iteration", default=5000, type=int)
+    op = OptimizationParams(parser)
+    parser.add_argument("--iteration", default=40000, type=int)
     parser.add_argument("--skip_train", action="store_true")
     parser.add_argument("--skip_test", action="store_true")
     parser.add_argument("--quiet", action="store_true")
@@ -259,7 +274,7 @@ if __name__ == "__main__":
         args = merge_hparams(args, config)
     # Initialize system state (RNG)
     safe_state(args.quiet)
-    render_sets(model.extract(args), hyperparam.extract(args), args.iteration, 
+    render_sets(model.extract(args), op.extract(args), hyperparam.extract(args), args.iteration, 
         pipeline.extract(args), 
         args.skip_train, args.skip_test, args.skip_video,
         args.reconstruct_train,args.reconstruct_test,args.reconstruct_video)

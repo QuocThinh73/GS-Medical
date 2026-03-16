@@ -11,6 +11,7 @@
 
 import os
 import random
+import torch
 import json
 from utils.system_utils import searchForMaxIteration
 from scene.dataset_readers import sceneLoadTypeCallbacks
@@ -18,6 +19,10 @@ from scene.gaussian_model import GaussianModel
 from arguments import ModelParams
 from utils.camera_utils import cameraList_from_camInfos, camera_to_JSON
 from torch.utils.data import Dataset
+from utils.system_utils import mkdir_p
+from scene.NVDIFFREC import save_env_map, load_env
+from scene.deform_model import DeformEnvModel
+
 
 class Scene:
 
@@ -72,6 +77,8 @@ class Scene:
                                                     "point_cloud",
                                                     "iteration_" + str(self.loaded_iter),
                                                    ))
+            cubemap_weights_path = os.path.join(self.model_path, "cubemap/iteration_{}/cubemap.pth".format(self.loaded_iter))
+            self.gaussians.brdf_mlp = load_env(torch.load(cubemap_weights_path))
         else:
             print("Creating scene from point cloud")
             self.gaussians.create_from_pcd(scene_info.point_cloud, args.camera_extent, self.maxtime, init_args=init_train_args)
@@ -83,6 +90,12 @@ class Scene:
             point_cloud_path = os.path.join(self.model_path, "point_cloud/iteration_{}".format(iteration))
         self.gaussians.save_ply(os.path.join(point_cloud_path, "point_cloud.ply"))
         # self.gaussians.save_deformation(point_cloud_path)
+        brdf_mlp_path = os.path.join(self.model_path, f"brdf_mlp/iteration_{iteration}/brdf_mlp.hdr")
+        mkdir_p(os.path.dirname(brdf_mlp_path))
+        save_env_map(brdf_mlp_path, self.gaussians.brdf_mlp)
+        cubemap_path = os.path.join(self.model_path, "cubemap/iteration_{}".format(iteration))
+        os.makedirs(cubemap_path, exist_ok=True)
+        torch.save(self.gaussians.brdf_mlp.base, os.path.join(cubemap_path, 'cubemap.pth'))
     
     def getTrainCameras(self, scale=1.0):
         return self.train_camera

@@ -9,15 +9,15 @@
 #
 import torch
 from random import randint
-from utils.loss_utils import TV_loss, def_reg_loss, l1_loss, ssim
+from utils.loss_utils import TV_loss, def_reg_loss, l1_loss, ssim, compute_normal_loss
 from gaussian_renderer import render
 from gaussian_renderer import network_gui
 
 import time
 import sys
-from scene import  Scene
+from scene import Scene, DeformEnvModel
 from scene.gaussian_model import GaussianModel
-from utils.general_utils import safe_state
+from utils.general_utils import safe_state, safe_normalize, reflect, calculate_eccentricities
 from tqdm import tqdm
 from utils.image_utils import psnr
 from argparse import ArgumentParser
@@ -44,8 +44,11 @@ def training(dataset, hyper, opt, pipe, args):
 
     first_iter = 0
     tb_writer = prepare_output_and_logger(args)
-    gaussians = GaussianModel(dataset.sh_degree, hyper)
+    gaussians = GaussianModel(dataset.sh_degree, dataset.brdf_envmap_res, hyper)
     dataset.model_path = args.model_path
+
+    deform_env = DeformEnvModel(t_multires=dataset.t_multires)
+    deform_env.train_setting(opt)
 
     scene = Scene(dataset, gaussians, init_train_args=opt)
     gaussians.training_setup(opt)
@@ -94,8 +97,8 @@ def training(dataset, hyper, opt, pipe, args):
 
         gaussians.update_learning_rate(iteration)
 
-        # Every 500 its we increase the levels of SH up to a maximum degree
-        if iteration % 500 == 0:
+        # Every 1000 its we increase the levels of SH up to a maximum degree
+        if iteration % 1000 == 0:
             gaussians.oneupSHdegree()
 
         # Pick a random Camera
@@ -111,12 +114,45 @@ def training(dataset, hyper, opt, pipe, args):
         if (iteration - 1) == args.debug_from:
             pipe.debug = True
 
-        ori_time = torch.tensor(viewpoint_cam.time).to(gaussians.get_xyz.device)
-        d_xyz, d_scales, d_rotations = gaussians.deformation(ori_time)
+        d_reflvec = 0.0
+        d_reflvec = torch.tensor(d_reflvec)
+        d_reflvec = d_reflvec.to('cuda')
+        if iteration < opt.warm_up:
+            d_xyz = torch.zeros_like(gaussians.get_xyz)
+            d_scales = torch.zeros_like(gaussians._scaling)
+            d_rotations = torch.zeros_like(gaussians._rotation)
+        else:
+            ori_time = torch.tensor(viewpoint_cam.time).to(gaussians.get_xyz.device)
+            if iteration >= opt.warm_up2 and iteration < opt.warm_up3:
+                with torch.no_grad():
+                    d_xyz, d_scales, d_rotations = gaussians.deformation(ori_time)
+            else:
+                d_xyz, d_scales, d_rotations = gaussians.deformation(ori_time)
 
-        render_pkg = render(viewpoint_cam, gaussians, pipe, background, d_xyz, d_scales, d_rotations)
-        image, depth, viewspace_point_tensor, visibility_filter, radii = \
-            render_pkg["render"], render_pkg["depth"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
+            gb_pos = gaussians.get_xyz + d_xyz 
+            view_pos = viewpoint_cam.camera_center.to("cuda").repeat(gaussians.get_opacity.shape[0], 1) 
+            d_viewdir_normalized = safe_normalize(view_pos - gb_pos)
+            normal, deform_delta_normal = gaussians.get_normal(gaussians.get_scaling, gaussians.get_rotation, d_scales, d_rotations, d_viewdir_normalized) 
+
+        if iteration >= opt.warm_up2:
+            gaussians.brdf_mlp.build_mips()
+            if iteration >= (opt.warm_up2 + 2000):
+                reflvec = safe_normalize(reflect(d_viewdir_normalized, normal))
+                ori_time = torch.as_tensor(
+                    viewpoint_cam.time,
+                    device=reflvec.device,
+                    dtype=reflvec.dtype
+                ).view(1, 1).expand(reflvec.shape[0], 1)
+                d_reflvec = deform_env.step(reflvec.detach(), ori_time)
+
+        gaussians.set_requires_grad("xyz", state=not (iteration >= opt.warm_up2 and iteration < (opt.warm_up3)))
+        gaussians.set_requires_grad("opacity", state=not (iteration >= opt.warm_up2 and iteration < (opt.warm_up3)))
+        gaussians.set_requires_grad("scaling", state=not (iteration >= opt.warm_up2 and iteration < (opt.warm_up3)))
+        gaussians.set_requires_grad("rotation", state=not (iteration >= opt.warm_up2 and iteration < (opt.warm_up3)))
+
+        render_pkg = render(viewpoint_cam, gaussians, pipe, background, d_xyz, d_scales, d_rotations, d_reflvec, iteration, opt)
+        image, viewspace_point_tensor, visibility_filter, radii = \
+            render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
         
         # -----------------------------------------------------------
         # Loss computation
@@ -127,35 +163,48 @@ def training(dataset, hyper, opt, pipe, args):
 
         loss = (1.0 - opt.lambda_dssim) * L1_images
         psnr_ = psnr(image, gt_image, mask).mean().double()
+
+        normal_loss , delta_normal_loss = 0.0, 0.0
+        normal_loss = torch.tensor(normal_loss)
+        delta_normal_loss = torch.tensor(delta_normal_loss)
+        if iteration >= opt.warm_up + 3000:
+            lambda_normal = opt.lambda_normal if iteration >= (opt.warm_up + 3000) else 0.0
+            normal_loss = lambda_normal * compute_normal_loss(render_pkg["normal"], render_pkg["normal_ref"])
+            
+            lambda_delta_normal = calculate_eccentricities(torch.abs(gaussians.get_scaling + d_scales)).unsqueeze(-1) if iteration > (opt.warm_up + 3000) else 0.0
+            lambda_delta_normal = lambda_delta_normal if iteration >= (opt.warm_up + 3000) else 0.0
+            delta_normal_loss = (lambda_delta_normal * (deform_delta_normal ** 2)).mean()
+         
+            loss = loss + normal_loss + delta_normal_loss
         
-        if opt.lambda_depth != 0 and viewpoint_cam.original_depth is not None:
-            gt_depth = viewpoint_cam.original_depth.cuda()
+        # if opt.lambda_depth != 0 and viewpoint_cam.original_depth is not None:
+        #     gt_depth = viewpoint_cam.original_depth.cuda()
 
-            depth[depth!=0] = 1 / depth[depth!=0]
-            gt_depth[gt_depth!=0] = 1 / gt_depth[gt_depth!=0]
+        #     depth[depth!=0] = 1 / depth[depth!=0]
+        #     gt_depth[gt_depth!=0] = 1 / gt_depth[gt_depth!=0]
 
-            L_depth = l1_loss(depth, gt_depth, mask)
-            loss += opt.lambda_depth * L_depth
+        #     L_depth = l1_loss(depth, gt_depth, mask)
+        #     loss += opt.lambda_depth * L_depth
 
         if opt.lambda_dssim != 0:
             L_dssim = 1.0 - ssim(image, gt_image, mask=mask)
             loss += opt.lambda_dssim * L_dssim
 
-        if opt.lambda_tv_image != 0:
-            L_tv_image = TV_loss(image)
-            loss += opt.lambda_tv_image * L_tv_image
+        # if opt.lambda_tv_image != 0:
+        #     L_tv_image = TV_loss(image)
+        #     loss += opt.lambda_tv_image * L_tv_image
 
-        if opt.lambda_tv_depth != 0:
-            L_tv_depth = TV_loss(depth)
-            loss += opt.lambda_tv_depth * L_tv_depth
+        # if opt.lambda_tv_depth != 0:
+        #     L_tv_depth = TV_loss(depth)
+        #     loss += opt.lambda_tv_depth * L_tv_depth
 
-        loss_pos, loss_cov = def_reg_loss(scene.gaussians, d_xyz, d_rotations, d_scales)
+        # loss_pos, loss_cov = def_reg_loss(scene.gaussians, d_xyz, d_rotations, d_scales)
 
-        if opt.lambda_def_reg_pos != 0:
-            loss += opt.lambda_def_reg_pos * loss_pos
+        # if opt.lambda_def_reg_pos != 0:
+        #     loss += opt.lambda_def_reg_pos * loss_pos
 
-        if opt.lambda_def_reg_cov != 0:
-            loss += opt.lambda_def_reg_cov * loss_cov
+        # if opt.lambda_def_reg_cov != 0:
+        #     loss += opt.lambda_def_reg_cov * loss_cov
 
         sys_exit = False
         if loss.isnan():
@@ -184,8 +233,8 @@ def training(dataset, hyper, opt, pipe, args):
                 progress_bar.close()
 
             # Save images
-            if args.save_img_from_itr and iteration in args.save_img_from_itr:
-                save_example_images(image, gt_image, depth, gt_depth, iteration, dataset.source_path)
+            # if args.save_img_from_itr and iteration in args.save_img_from_itr:
+            #     save_example_images(image, gt_image, depth, gt_depth, iteration, dataset.source_path)
 
             # Log and save
             report_params = {
@@ -207,7 +256,13 @@ def training(dataset, hyper, opt, pipe, args):
                 scene.save(iteration, 'fine')
 
             if (iteration in args.test_iterations):
-                print(f"[ITER {iteration}] Total Loss: {loss.item():.{7}f}, PSNR: {psnr_:.{2}f}, L1 Loss: {((1.0 - opt.lambda_dssim) * L1_images).item():.{7}f}, L_dssim: {(opt.lambda_dssim * L_dssim).item() if opt.lambda_dssim != 0 else 0:.{7}f}, L_depth: {(opt.lambda_depth * L_depth).item() if opt.lambda_depth != 0 else 0:.{7}f}, L_tv_image: {(opt.lambda_tv_image * L_tv_image).item() if opt.lambda_tv_image != 0 else 0:.{7}f}, L_tv_depth: {(opt.lambda_tv_depth * L_tv_depth).item() if opt.lambda_tv_depth != 0 else 0:.{7}f}, L_def_reg_pos: {(opt.lambda_def_reg_pos * loss_pos).item() if opt.lambda_def_reg_pos != 0 else 0:.{7}f}, L_def_reg_cov: {(opt.lambda_def_reg_cov * loss_cov).item() if opt.lambda_def_reg_cov != 0 else 0:.{7}f}")
+                print(f"[ITER {iteration}] \
+                        Total Loss: {loss.item():.{7}f}, \
+                        PSNR: {psnr_:.{2}f}, \
+                        L1 Loss: {((1.0 - opt.lambda_dssim) * L1_images).item():.{7}f}, \
+                        L_dssim: {(opt.lambda_dssim * L_dssim).item() if opt.lambda_dssim != 0 else 0:.{7}f}, \
+                        L_normal: {normal_loss}, \
+                        L_delta_normal: {delta_normal_loss}")
 
             if sys_exit:
                 sys.exit()

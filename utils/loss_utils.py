@@ -14,6 +14,7 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 from math import exp
 from pytorch3d.ops.knn import knn_points
+from utils.image_utils import erode
 
 
 def l1_loss(network_output, gt, mask=None):
@@ -113,3 +114,26 @@ def def_reg_loss(gs_can, d_xyz, d_rotation, d_scaling, K=5):
     loss_cov = F.l1_loss(dis_cov_can, dis_cov_obs)
 
     return loss_pos, loss_cov
+
+def compute_normal_loss(normal, normal_ref, alpha=None):
+    """Computes the predicted normal supervision loss defined in ref-NeRF."""
+    # normal: (3, H, W), normal_ref: (3, H, W), alpha: (3, H, W)
+    if alpha is not None:
+        device = alpha.device
+        weight = alpha.detach().cpu().numpy()[0]
+        weight = (weight*255).astype(np.uint8)
+
+        weight = erode(weight, erode_size=4)
+
+        weight = torch.from_numpy(weight.astype(np.float32)/255.)
+        weight = weight[None,...].repeat(3,1,1)
+        weight = weight.to(device) 
+    else:
+        weight = torch.ones_like(normal_ref)
+
+    w = weight.permute(1,2,0).reshape(-1,3)[...,0].detach()
+    n = normal_ref.permute(1,2,0).reshape(-1,3).detach()
+    n_pred = normal.permute(1,2,0).reshape(-1,3)
+    loss = (w * (1.0 - torch.sum(n * n_pred, axis=-1))).mean()
+
+    return loss
