@@ -71,8 +71,9 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
         
     deformation_point = pc._deformation_table
         
-    with torch.no_grad():
-        pc._deformation_accum[deformation_point] += torch.abs(d_xyz[deformation_point])
+    if hasattr(pc, "_deformation_accum") and pc._deformation_accum.shape[0] == pc.get_xyz.shape[0]:
+        with torch.no_grad():
+            pc._deformation_accum[deformation_point] += torch.abs(d_xyz[deformation_point])
 
     # If precomputed colors are provided, use them. Otherwise, if it is desired to precompute colors
     # from SHs in Python, do it. If not, then SH -> RGB conversion will be done by rasterizer.

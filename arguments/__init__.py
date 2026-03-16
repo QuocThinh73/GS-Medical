@@ -93,12 +93,12 @@ class FDMHiddenParams(ParamGroup):
 
 class OptimizationParams(ParamGroup):
     def __init__(self, parser):
-        self.dataloader=False
-        self.iterations = 10000
+        self.dataloader = False
+        self.iterations = 40000
         self.position_lr_init = 0.00016
         self.position_lr_final = 0.0000016
         self.position_lr_delay_mult = 0.01
-        self.position_lr_max_steps = 3000
+        self.position_lr_max_steps = 2000
         self.deformation_lr_init = 0.00016
         self.deformation_lr_final = 0.0000016
         self.deformation_lr_delay_mult = 0.01
@@ -111,7 +111,7 @@ class OptimizationParams(ParamGroup):
         self.weight_constraint_init= 1
         self.weight_constraint_after = 0.2
         self.weight_decay_iteration = 5000
-        self.opacity_reset_interval = 3000
+        self.opacity_reset_interval = 30000
         self.densification_interval = 100
         self.densify_from_iter = 500
         self.densify_until_iter = 5000
@@ -138,7 +138,7 @@ class OptimizationParams(ParamGroup):
         self.roughness_lr = 0.0002
 
         # warmup
-        self.warmup = 5000
+        self.warmup = 2000
         
         super().__init__(parser, "Optimization Parameters")
 

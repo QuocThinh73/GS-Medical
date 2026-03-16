@@ -67,7 +67,7 @@ def cal_lpips(a, b, device="cuda", batch=2):
     lpips_mean = lpips_all.mean()
     return lpips_mean
 
-def readImages(renders_dir, gt_dir, depth_dir, gtdepth_dir, masks_dir):
+def readImages(renders_dir, gt_dir, depth_dir, gt_depth_dir, masks_dir):
     renders = []
     gts = []
     image_names = []
@@ -79,7 +79,7 @@ def readImages(renders_dir, gt_dir, depth_dir, gtdepth_dir, masks_dir):
         render = np.array(Image.open(renders_dir / fname))
         gt = np.array(Image.open(gt_dir / fname))
         depth = np.array(Image.open(depth_dir / fname))
-        gt_depth = np.array(Image.open(gtdepth_dir / fname))
+        gt_depth = np.array(Image.open(gt_depth_dir / fname))
         mask = np.array(Image.open(masks_dir / fname))
         
         renders.append(tf.to_tensor(render).unsqueeze(0)[:, :3, :, :].cuda())

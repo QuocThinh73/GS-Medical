@@ -48,7 +48,7 @@ echo "[1/3] Training..."
 echo "[2/3] Rendering..."
 # python render.py \
 #     --model_path "$MODEL_PATH"
-for iter in $(seq 3500 500 10000)
+for iter in $(seq 0 1000 40000)
 do
     echo "Rendering iteration $iter"
     python render.py \
@@ -56,7 +56,7 @@ do
         --iteration $iter \
         --skip_train \
         --skip_video \
-        --quiet
+        # --quiet
 done
 
 #########################

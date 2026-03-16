@@ -44,8 +44,7 @@ def generate_video(imgs_path, text_to_add = ''):
         writer.append_data(np.array(img))
     writer.close()
 
-def render_set(model_path, name, opt, iteration, views, gaussians, pipeline, background,\
-    no_fine, render_test=False, reconstruct=False, crop_size=0):
+def render_set(model_path, name, opt, iteration, views, gaussians, pipeline, background, no_fine, render_test=False, reconstruct=False, crop_size=0):
     render_path = os.path.join(model_path, name, "ours_{}".format(iteration), "renders")
     render_inpaint_path = os.path.join(model_path, name, "ours_{}".format(iteration), "renders_inpaint")
     depth_path = os.path.join(model_path, name, "ours_{}".format(iteration), "depth")
@@ -203,11 +202,11 @@ def render_sets(dataset : ModelParams, hyperparam, opt, iteration : int, pipelin
         background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
         
         if not skip_train:
-            render_set(dataset.model_path, "train", opt, scene.loaded_iter, scene.getTrainCameras(), gaussians, pipeline, background, False, reconstruct=reconstruct_train)
+            render_set(dataset.model_path, "train", opt, iteration, scene.getTrainCameras(), gaussians, pipeline, background, False, reconstruct=reconstruct_train)
         if not skip_test:
-            render_set(dataset.model_path, "test", opt, scene.loaded_iter, scene.getTestCameras(), gaussians, pipeline, background, False, reconstruct=reconstruct_test, crop_size=20)
+            render_set(dataset.model_path, "test", opt, iteration, scene.getTestCameras(), gaussians, pipeline, background, False, reconstruct=reconstruct_test, crop_size=20)
         if not skip_video:
-            render_set(dataset.model_path, "video", opt, scene.loaded_iter, scene.getVideoCameras(),gaussians,pipeline,background, False, render_test=True, reconstruct=reconstruct_video, crop_size=20)
+            render_set(dataset.model_path, "video", opt, iteration, scene.getVideoCameras(),gaussians, pipeline, background, False, render_test=True, reconstruct=reconstruct_video, crop_size=20)
 
 def reconstruct_point_cloud(images, masks, depths, camera_parameters, name, model_path, crop_left_size=0):
     import cv2
@@ -264,7 +263,7 @@ if __name__ == "__main__":
     model = ModelParams(parser, sentinel=True)
     pipeline = PipelineParams(parser)
     hyperparam = FDMHiddenParams(parser)
-    opt = OptimizationParams(parser)
+    op = OptimizationParams(parser)
     parser.add_argument("--iteration", default=5000, type=int)
     parser.add_argument("--skip_train", action="store_true")
     parser.add_argument("--skip_test", action="store_true")
@@ -277,7 +276,7 @@ if __name__ == "__main__":
     print("Rendering ", args.model_path)
     # Initialize system state (RNG)
     safe_state(args.quiet)
-    render_sets(model.extract(args), hyperparam.extract(args), opt.extract(args), args.iteration, 
+    render_sets(model.extract(args), hyperparam.extract(args), op.extract(args), args.iteration, 
         pipeline.extract(args), 
         args.skip_train, args.skip_test, args.skip_video,
         args.reconstruct_train,args.reconstruct_test,args.reconstruct_video)
