@@ -46,7 +46,7 @@ class ParamGroup:
 
 class ModelParams(ParamGroup): 
     def __init__(self, parser, sentinel=False):
-        self.sh_degree = 3
+        self.sh_degree = 0
         self._source_path = ""
         self._model_path = ""
         self._images = "images"
@@ -55,8 +55,8 @@ class ModelParams(ParamGroup):
         self.data_device = "cuda"
         self.eval = True
         self.render_process=False
-        self.extra_mark = None
-        self.camera_extent = None
+        self.extra_mark = 'endonerf'
+        self.camera_extent = 10
         super().__init__(parser, "Loading Parameters", sentinel)
 
     def extract(self, args):
@@ -94,13 +94,13 @@ class FDMHiddenParams(ParamGroup):
 class OptimizationParams(ParamGroup):
     def __init__(self, parser):
         self.dataloader=False
-        self.iterations = 40_000
+        self.iterations = 10000
         self.position_lr_init = 0.00016
         self.position_lr_final = 0.0000016
         self.position_lr_delay_mult = 0.01
-        self.position_lr_max_steps = 40_000
+        self.position_lr_max_steps = 3000
         self.deformation_lr_init = 0.00016
-        self.deformation_lr_final = 0.000016
+        self.deformation_lr_final = 0.0000016
         self.deformation_lr_delay_mult = 0.01
 
         self.feature_lr = 0.0025
@@ -114,7 +114,7 @@ class OptimizationParams(ParamGroup):
         self.opacity_reset_interval = 3000
         self.densification_interval = 100
         self.densify_from_iter = 500
-        self.densify_until_iter = 40000
+        self.densify_until_iter = 5000
         self.densify_grad_threshold_coarse = 0.0002
         self.densify_grad_threshold_fine_init = 0.0002
         self.densify_grad_threshold_after = 0.0002
@@ -125,12 +125,20 @@ class OptimizationParams(ParamGroup):
         self.opacity_threshold_fine_after = 0.005
 
         # losses params
+        self.lambda_inpaint_aux = 1.0
+        self.lambda_final = 1.0
         self.lambda_dssim = 0.2
         self.lambda_depth = 1.0
-        self.lambda_tv_image = 0.01
-        self.lambda_tv_depth = 0.01
+        self.lambda_tv_image = 0.00
+        self.lambda_tv_depth = 0.00
         self.lambda_def_reg_pos = 0.5
         self.lambda_def_reg_cov = 0.0
+
+        self.specular_lr = 0.0002
+        self.roughness_lr = 0.0002
+
+        # warmup
+        self.warmup = 5000
         
         super().__init__(parser, "Optimization Parameters")
 

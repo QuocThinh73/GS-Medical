@@ -165,3 +165,16 @@ def cdist(x, y):
     y_norm = y.pow(2).sum(dim=1, keepdim=True)
     res = torch.addmm(y_norm.transpose(-2, -1), x, y.transpose(-2, -1), alpha=-2).add_(x_norm)
     return res.clamp_min_(1e-30).sqrt_()
+
+def get_minimum_axis(scales, rotations):
+    sorted_idx = torch.argsort(scales, descending=False, dim=-1)
+    R = build_rotation(rotations)
+    R_sorted = torch.gather(R, dim=2, index=sorted_idx[:,None,:].repeat(1, 3, 1)).squeeze()
+    return R_sorted[:,:,0] 
+
+def flip_align_view(normal, viewdir):
+    dotprod = torch.sum(
+        normal * viewdir, dim=-1, keepdims=True) 
+    non_flip = dotprod>=0 
+    normal_flipped = normal*torch.where(non_flip, 1, -1) 
+    return normal_flipped

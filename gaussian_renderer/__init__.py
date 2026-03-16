@@ -14,8 +14,10 @@ import math
 from diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianRasterizer
 from scene.gaussian_model import GaussianModel
 from utils.sh_utils import eval_sh
+from utils.bsdf_utils import bsdf_pbr_specular, _safe_normalize
 
-def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, d_xyz, d_scales, d_rotations, scaling_modifier = 1.0, override_color = None):
+
+def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, d_xyz, d_scales, d_rotations, iteration, opt, scaling_modifier = 1.0, override_color = None):
     """
     Render the scene. 
     
@@ -64,7 +66,7 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     if pipe.compute_cov3D_python:
         cov3D_precomp = pc.get_covariance(scaling_modifier)
     else:
-        scales = scales = pc.scaling_activation(pc._scaling + d_scales)
+        scales = pc.scaling_activation(pc._scaling + d_scales)
         rotations = pc.rotation_activation(pc._rotation + d_rotations)
         
     deformation_point = pc._deformation_table
@@ -77,14 +79,7 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     shs = None
     colors_precomp = None
     if override_color is None:
-        if pipe.convert_SHs_python:
-            shs_view = pc.get_features.transpose(1, 2).view(-1, 3, (pc.max_sh_degree+1)**2)
-            dir_pp = (means3D - viewpoint_camera.camera_center.cuda().repeat(pc.get_features.shape[0], 1))
-            dir_pp_normalized = dir_pp/dir_pp.norm(dim=1, keepdim=True)
-            sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
-            colors_precomp = torch.clamp_min(sh2rgb + 0.5, 0.0)
-        else:
-            shs = pc.get_features
+        shs = pc.get_features
     else:
         colors_precomp = override_color
 
@@ -101,8 +96,40 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
 
     # Those Gaussians that were frustum culled or had a radius of 0 were not visible.
     # They will be excluded from value updates used in the splitting criteria.
-    return {"render": rendered_image,
-            "depth": depth,
-            "viewspace_points": screenspace_points,
-            "visibility_filter" : radii > 0,
-            "radii": radii,}
+    rendered_image = rendered_image.clamp(0, 1)
+    out = {
+        "render_inpaint": rendered_image,
+        "depth": depth,
+        "viewspace_points": screenspace_points,
+        "visibility_filter" : radii > 0,
+        "radii": radii,
+    }
+
+    if iteration < opt.warmup:
+        return out
+    
+    specular = pc.get_specular
+    roughness = pc.get_roughness
+    view_pos = light_pos = viewpoint_camera.camera_center.cuda()
+    wo = _safe_normalize(view_pos - means3D)
+    wi = _safe_normalize(light_pos - means3D)
+    normal = pc.get_normal(d_scales, d_rotations, wo)
+    specular_color = bsdf_pbr_specular(specular, normal, wo, wi, roughness * roughness)
+
+    final_image = rasterizer(
+        means3D = means3D,
+        means2D = means2D,
+        shs = None,
+        colors_precomp = torch.clamp(pc.get_diffuse_color(view_pos) + specular_color, 0, 1),
+        opacities = opacity,
+        scales = scales,
+        rotations = rotations,
+        cov3D_precomp = cov3D_precomp
+    )[0]
+
+    out.update({
+        "render_final": final_image
+    })
+
+    return out
+

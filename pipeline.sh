@@ -37,23 +37,25 @@ echo "======================================"
 #########################
 
 echo "[1/3] Training..."
-python train.py \
-    -s "$DATA_PATH" \
-    --expname "$EXP_NAME"
+# python train.py \
+#     -s "$DATA_PATH" \
+#     --expname "$EXP_NAME"
 
 #########################
 # 2. RENDER
 #########################
 
 echo "[2/3] Rendering..."
-python render.py \
-    --model_path "$MODEL_PATH"
-for iter in $(seq 1000 1000 40000)
+# python render.py \
+#     --model_path "$MODEL_PATH"
+for iter in $(seq 3500 500 10000)
 do
     echo "Rendering iteration $iter"
     python render.py \
         --model_path "$MODEL_PATH" \
         --iteration $iter \
+        --skip_train \
+        --skip_video \
         --quiet
 done
 

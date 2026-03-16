@@ -19,7 +19,7 @@ from gaussian_renderer import render
 import torchvision
 from utils.general_utils import safe_state
 from argparse import ArgumentParser
-from arguments import ModelParams, PipelineParams, get_combined_args, FDMHiddenParams
+from arguments import ModelParams, PipelineParams, get_combined_args, FDMHiddenParams, OptimizationParams
 from scene.gaussian_model import GaussianModel
 from time import time
 import open3d as o3d
@@ -44,9 +44,10 @@ def generate_video(imgs_path, text_to_add = ''):
         writer.append_data(np.array(img))
     writer.close()
 
-def render_set(model_path, name, iteration, views, gaussians, pipeline, background,\
+def render_set(model_path, name, opt, iteration, views, gaussians, pipeline, background,\
     no_fine, render_test=False, reconstruct=False, crop_size=0):
     render_path = os.path.join(model_path, name, "ours_{}".format(iteration), "renders")
+    render_inpaint_path = os.path.join(model_path, name, "ours_{}".format(iteration), "renders_inpaint")
     depth_path = os.path.join(model_path, name, "ours_{}".format(iteration), "depth")
     gts_path = os.path.join(model_path, name, "ours_{}".format(iteration), "gt")
     gt_depth_path = os.path.join(model_path, name, "ours_{}".format(iteration), "gt_depth")
@@ -55,6 +56,7 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     specular_mask_path = os.path.join(model_path, name, "ours_{}".format(iteration), "specular_masks")
 
     makedirs(render_path, exist_ok=True)
+    makedirs(render_inpaint_path, exist_ok=True)
     makedirs(depth_path, exist_ok=True)
     makedirs(gts_path, exist_ok=True)
     makedirs(gt_depth_path, exist_ok=True)
@@ -63,6 +65,7 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     makedirs(specular_mask_path, exist_ok=True)
     
     render_images = []
+    render_inpaints = []
     render_depths = []
     gt_list = []
     gt_depths = []
@@ -74,9 +77,22 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
         stage = 'coarse' if no_fine else 'fine'
         ori_time = torch.tensor(view.time).to(gaussians.get_xyz.device)
         d_xyz, d_scales, d_rotations = gaussians.deformation(ori_time)
-        rendering = render(view, gaussians, pipeline, background, d_xyz, d_scales, d_rotations)
+
+        rendering = render(
+            view, gaussians, pipeline, background,
+            d_xyz, d_scales, d_rotations, iteration, opt
+        )
+
         render_depths.append(rendering["depth"].cpu())
-        render_images.append(rendering["render"].cpu())
+        render_inpaints.append(rendering["render_inpaint"].cpu())
+
+        use_render_final = (iteration >= opt.warmup) and ("render_final" in rendering)
+
+        if use_render_final:
+            render_images.append(rendering["render_final"].cpu())
+        else:
+            render_images.append(rendering["render_inpaint"].cpu())
+
         if name in ["train", "test", "video"]:
             gt = view.original_image[0:3, :, :]
             gt_list.append(gt)
@@ -89,18 +105,18 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
             specular_mask = view.specular_mask
             specular_masks.append(specular_mask)
 
-    if render_test:
-        test_times = 20
-        for i in range(test_times):
-            for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
-                if idx == 0 and i == 0:
-                    time1 = time()
-                stage = 'coarse' if no_fine else 'fine'
-                ori_time = torch.tensor(view.time).to(gaussians.get_xyz.device)
-                d_xyz, d_scales, d_rotations = gaussians.deformation(ori_time)
-                rendering = render(view, gaussians, pipeline, background, d_xyz, d_scales, d_rotations)
-        time2=time()
-        print("FPS:",(len(views)-1)*test_times/(time2-time1))
+    # if render_test:
+    #     test_times = 20
+    #     for i in range(test_times):
+    #         for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
+    #             if idx == 0 and i == 0:
+    #                 time1 = time()
+    #             stage = 'coarse' if no_fine else 'fine'
+    #             ori_time = torch.tensor(view.time).to(gaussians.get_xyz.device)
+    #             d_xyz, d_scales, d_rotations = gaussians.deformation(ori_time)
+    #             rendering = render(view, gaussians, pipeline, background, d_xyz, d_scales, d_rotations)
+    #     time2=time()
+    #     print("FPS:",(len(views)-1)*test_times/(time2-time1))
     
     count = 0
     print("writing gt images.")
@@ -129,6 +145,13 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     if len(render_images) != 0:
         for image in tqdm(render_images):
             torchvision.utils.save_image(image, os.path.join(render_path, '{0:05d}'.format(count) + ".png"))
+            count +=1
+
+    count = 0
+    print("writing rendering inpaint images.")
+    if len(render_inpaints) != 0:
+        for image in tqdm(render_inpaints):
+            torchvision.utils.save_image(image, os.path.join(render_inpaint_path, '{0:05d}'.format(count) + ".png"))
             count +=1
     
     count = 0
@@ -159,9 +182,9 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     render_array = (render_array*255).clip(0, 255).cpu().numpy().astype(np.uint8) # BxHxWxC
     imageio.mimwrite(os.path.join(model_path, name, "ours_{}".format(iteration), 'ours_video.mp4'), render_array, fps=30, quality=8)
 
-    render_array = torch.stack(inpaints, dim=0).permute(0, 2, 3, 1)
+    render_array = torch.stack(render_inpaints, dim=0).permute(0, 2, 3, 1)
     render_array = (render_array*255).clip(0, 255).cpu().numpy().astype(np.uint8) # BxHxWxC
-    imageio.mimwrite(os.path.join(model_path, name, "ours_{}".format(iteration), 'inpaint_video.mp4'), render_array, fps=30, quality=8)
+    imageio.mimwrite(os.path.join(model_path, name, "ours_{}".format(iteration), 'ours_inpaint_video.mp4'), render_array, fps=30, quality=8)
                     
     FoVy, FoVx, height, width = view.FoVy, view.FoVx, view.image_height, view.image_width
     focal_y, focal_x = fov2focal(FoVy, height), fov2focal(FoVx, width)
@@ -171,7 +194,7 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
         print('file name:', name)
         reconstruct_point_cloud(render_images, mask_list, render_depths, camera_parameters, name, model_path, crop_size)
 
-def render_sets(dataset : ModelParams, hyperparam, iteration : int, pipeline : PipelineParams, skip_train : bool, skip_test : bool, skip_video: bool, reconstruct_train: bool, reconstruct_test: bool, reconstruct_video: bool):
+def render_sets(dataset : ModelParams, hyperparam, opt, iteration : int, pipeline : PipelineParams, skip_train : bool, skip_test : bool, skip_video: bool, reconstruct_train: bool, reconstruct_test: bool, reconstruct_video: bool):
     with torch.no_grad():
         gaussians = GaussianModel(dataset.sh_degree, hyperparam)
         scene = Scene(dataset, gaussians, load_iteration=iteration)
@@ -180,11 +203,11 @@ def render_sets(dataset : ModelParams, hyperparam, iteration : int, pipeline : P
         background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
         
         if not skip_train:
-            render_set(dataset.model_path, "train", scene.loaded_iter, scene.getTrainCameras(), gaussians, pipeline, background, False, reconstruct=reconstruct_train)
+            render_set(dataset.model_path, "train", opt, scene.loaded_iter, scene.getTrainCameras(), gaussians, pipeline, background, False, reconstruct=reconstruct_train)
         if not skip_test:
-            render_set(dataset.model_path, "test", scene.loaded_iter, scene.getTestCameras(), gaussians, pipeline, background, False, reconstruct=reconstruct_test, crop_size=20)
+            render_set(dataset.model_path, "test", opt, scene.loaded_iter, scene.getTestCameras(), gaussians, pipeline, background, False, reconstruct=reconstruct_test, crop_size=20)
         if not skip_video:
-            render_set(dataset.model_path,"video",scene.loaded_iter, scene.getVideoCameras(),gaussians,pipeline,background, False, render_test=True, reconstruct=reconstruct_video, crop_size=20)
+            render_set(dataset.model_path, "video", opt, scene.loaded_iter, scene.getVideoCameras(),gaussians,pipeline,background, False, render_test=True, reconstruct=reconstruct_video, crop_size=20)
 
 def reconstruct_point_cloud(images, masks, depths, camera_parameters, name, model_path, crop_left_size=0):
     import cv2
@@ -241,6 +264,7 @@ if __name__ == "__main__":
     model = ModelParams(parser, sentinel=True)
     pipeline = PipelineParams(parser)
     hyperparam = FDMHiddenParams(parser)
+    opt = OptimizationParams(parser)
     parser.add_argument("--iteration", default=5000, type=int)
     parser.add_argument("--skip_train", action="store_true")
     parser.add_argument("--skip_test", action="store_true")
@@ -249,17 +273,11 @@ if __name__ == "__main__":
     parser.add_argument("--reconstruct_train", action="store_true")
     parser.add_argument("--reconstruct_test", action="store_true")
     parser.add_argument("--reconstruct_video", action="store_true")
-    parser.add_argument("--configs", type=str)
     args = get_combined_args(parser)
     print("Rendering ", args.model_path)
-    if args.configs:
-        import mmcv
-        from utils.params_utils import merge_hparams
-        config = mmcv.Config.fromfile(args.configs)
-        args = merge_hparams(args, config)
     # Initialize system state (RNG)
     safe_state(args.quiet)
-    render_sets(model.extract(args), hyperparam.extract(args), args.iteration, 
+    render_sets(model.extract(args), hyperparam.extract(args), opt.extract(args), args.iteration, 
         pipeline.extract(args), 
         args.skip_train, args.skip_test, args.skip_video,
         args.reconstruct_train,args.reconstruct_test,args.reconstruct_video)
