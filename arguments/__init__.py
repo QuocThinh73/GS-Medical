@@ -111,7 +111,7 @@ class OptimizationParams(ParamGroup):
         self.weight_constraint_init= 1
         self.weight_constraint_after = 0.2
         self.weight_decay_iteration = 5000
-        self.opacity_reset_interval = 150000
+        self.opacity_reset_interval = 3000
         self.densification_interval = 100
         self.densify_from_iter = 500
         self.densify_until_iter = 5000
@@ -128,7 +128,7 @@ class OptimizationParams(ParamGroup):
         self.lambda_inpaint_aux = 0.5
         self.lambda_final = 1.0
         self.lambda_dssim = 0.2
-        self.lambda_depth = 1.0
+        self.lambda_depth = 0.1
         self.lambda_tv_image = 0.01
         self.lambda_tv_depth = 0.01
         self.lambda_def_reg_pos = 0.1

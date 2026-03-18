@@ -8,3 +8,4 @@ pip install --force-reinstall -v "numpy==1.25.2"
 git submodule update --init --recursive
 pip install -e submodules/depth-diff-gaussian-rasterization --use-pep517 --no-build-isolation
 pip install -e submodules/simple-knn --use-pep517 --no-build-isolation
+pip install "git+https://github.com/facebookresearch/pytorch3d.git" --use-pep517 --no-build-isolation
