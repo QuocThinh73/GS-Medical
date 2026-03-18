@@ -146,12 +146,14 @@ def evaluate(model_paths):
                     render, gt, render_inpaint, gt_inpaint, mask = renders[idx], gts[idx], renders_inpaint[idx], inpaint[idx], masks[idx]
                     render = render * mask
                     gt = gt * mask
+                    render_inpaint = render_inpaint * mask
+                    gt_inpaint = gt_inpaint * mask
                     final_ssims.append(psnr(render, gt))
                     final_psnrs.append(ssim(render, gt))
                     final_lpipss.append(cal_lpips(render, gt))
-                    inpaint_ssims.append(psnr(render, gt))
-                    inpaint_psnrs.append(ssim(render, gt))
-                    inpaint_lpipss.append(cal_lpips(render, gt))
+                    inpaint_ssims.append(psnr(render_inpaint, gt_inpaint))
+                    inpaint_psnrs.append(ssim(render_inpaint, gt_inpaint))
+                    inpaint_lpipss.append(cal_lpips(render_inpaint, gt_inpaint))
 
                 print("Scene: ", scene_dir,  "Final SSIM : {:>12.7f}".format(torch.tensor(final_ssims).mean(), ".5"))
                 print("Scene: ", scene_dir,  "Final PSNR : {:>12.7f}".format(torch.tensor(final_psnrs).mean(), ".5"))
