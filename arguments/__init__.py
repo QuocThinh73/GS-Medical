@@ -94,11 +94,11 @@ class FDMHiddenParams(ParamGroup):
 class OptimizationParams(ParamGroup):
     def __init__(self, parser):
         self.dataloader = False
-        self.iterations = 40000
+        self.iterations = 30000
         self.position_lr_init = 0.00016
         self.position_lr_final = 0.0000016
         self.position_lr_delay_mult = 0.01
-        self.position_lr_max_steps = 4000
+        self.position_lr_max_steps = 20000
         self.deformation_lr_init = 0.00016
         self.deformation_lr_final = 0.0000016
         self.deformation_lr_delay_mult = 0.01
@@ -114,7 +114,7 @@ class OptimizationParams(ParamGroup):
         self.opacity_reset_interval = 3000
         self.densification_interval = 100
         self.densify_from_iter = 500
-        self.densify_until_iter = 5000
+        self.densify_until_iter = 15000
         self.densify_grad_threshold_coarse = 0.0002
         self.densify_grad_threshold_fine_init = 0.0002
         self.densify_grad_threshold_after = 0.0002
@@ -128,7 +128,7 @@ class OptimizationParams(ParamGroup):
         self.lambda_inpaint_aux = 0.5
         self.lambda_final = 1.0
         self.lambda_dssim = 0.2
-        self.lambda_depth = 0.1
+        self.lambda_depth = 1.0
         self.lambda_tv_image = 0.01
         self.lambda_tv_depth = 0.01
         self.lambda_def_reg_pos = 0.1

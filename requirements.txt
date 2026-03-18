@@ -5,3 +5,4 @@ plyfile
 imageio-ffmpeg
 open3d
 imageio
+opencv-python

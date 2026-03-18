@@ -2,6 +2,9 @@ conda create -n GS-Medical python=3.9
 conda activate GS-Medical
 conda install cudatoolkit=11.8
 conda install nvidia/label/cuda-11.8.0::cuda-toolkit
+export CUDA_HOME="$CONDA_PREFIX"
+export PATH="$CONDA_PREFIX/bin:$PATH"
+export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$CONDA_PREFIX/lib64:$LD_LIBRARY_PATH"
 pip install -r requirements.txt
 pip install torch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 --index-url https://download.pytorch.org/whl/cu118
 pip install --force-reinstall -v "numpy==1.25.2"
@@ -9,3 +12,4 @@ git submodule update --init --recursive
 pip install -e submodules/depth-diff-gaussian-rasterization --use-pep517 --no-build-isolation
 pip install -e submodules/simple-knn --use-pep517 --no-build-isolation
 pip install "git+https://github.com/facebookresearch/pytorch3d.git" --use-pep517 --no-build-isolation
+pip install --force-reinstall -v "numpy==1.25.2"

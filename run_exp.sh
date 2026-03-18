@@ -19,8 +19,8 @@ DATASET="EndoNeRF"
 DATA_ROOT="/media/dial2/Ubuntu Volume/dataset/EndoNeRF"
 
 SCENES=(
-    "pulling_soft_tissues"
     "cutting_tissues_twice"
+    "pulling_soft_tissues"
 )
 
 #########################
@@ -49,7 +49,7 @@ do
     # 2. RENDER
     #########################
     echo "[2/3] Rendering..."
-    for iter in $(seq 0 1000 40000)
+    for iter in $(seq 0 1000 30000)
     do
         echo "Rendering iteration $iter"
         python render.py \

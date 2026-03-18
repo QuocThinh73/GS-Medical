@@ -102,10 +102,10 @@ def training(dataset, hyper, opt, pipe, args):
 
         in_phase2 = iteration > opt.warmup
 
-        gaussians.set_requires_grad("xyz",       state=not in_phase2)
-        gaussians.set_requires_grad("opacity",   state=not in_phase2)
-        gaussians.set_requires_grad("scaling",   state=not in_phase2)
-        gaussians.set_requires_grad("rotation",  state=not in_phase2)
+        # gaussians.set_requires_grad("xyz",       state=not in_phase2)
+        # gaussians.set_requires_grad("opacity",   state=not in_phase2)
+        # gaussians.set_requires_grad("scaling",   state=not in_phase2)
+        # gaussians.set_requires_grad("rotation",  state=not in_phase2)
 
         # -----------------------------------------------------------
         # Rendering
@@ -180,13 +180,13 @@ def training(dataset, hyper, opt, pipe, args):
         # depth loss
         if opt.lambda_depth != 0 and viewpoint_cam.original_depth is not None:
             gt_depth = viewpoint_cam.original_depth.cuda().clone()
-            pred_depth = depth[0].clone()
+            pred_depth = depth.clone()
 
-            # pred_depth[pred_depth != 0] = 1.0 / pred_depth[pred_depth != 0]
-            # gt_depth[gt_depth != 0] = 1.0 / gt_depth[gt_depth != 0]
+            pred_depth[pred_depth != 0] = 1.0 / pred_depth[pred_depth != 0]
+            gt_depth[gt_depth != 0] = 1.0 / gt_depth[gt_depth != 0]
 
-            # L_depth = l1_loss(pred_depth, gt_depth, mask)
-            L_depth = compute_depth_loss(pred_depth, gt_depth, mask[0])
+            L_depth = l1_loss(pred_depth, gt_depth, mask)
+            # L_depth = compute_depth_loss(pred_depth, gt_depth, mask[0])
             loss += opt.lambda_depth * L_depth
         else:
             L_depth = torch.tensor(0.0, device="cuda")
@@ -321,8 +321,8 @@ def training(dataset, hyper, opt, pipe, args):
                 gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
                 gaussians.add_densification_stats(viewspace_point_tensor.grad, visibility_filter)
 
-                opacity_threshold = opt.opacity_threshold_fine_init - iteration*(opt.opacity_threshold_fine_init - opt.opacity_threshold_fine_after)/(opt.densify_until_iter)  
-                densify_threshold = opt.densify_grad_threshold_fine_init - iteration*(opt.densify_grad_threshold_fine_init - opt.densify_grad_threshold_after)/(opt.densify_until_iter )  
+                opacity_threshold = opt.opacity_threshold_fine_init - iteration*(opt.opacity_threshold_fine_init - opt.opacity_threshold_fine_after) / (opt.densify_until_iter)  
+                densify_threshold = opt.densify_grad_threshold_fine_init - iteration*(opt.densify_grad_threshold_fine_init - opt.densify_grad_threshold_after) / (opt.densify_until_iter)  
 
                 if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0 :
                     size_threshold = 20 if iteration > opt.opacity_reset_interval else None
