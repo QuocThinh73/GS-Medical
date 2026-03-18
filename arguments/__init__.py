@@ -139,8 +139,9 @@ class OptimizationParams(ParamGroup):
         self.specular_lr = 0.0005
         self.roughness_lr = 0.0005
 
-        # warmup
+        # iteration
         self.warmup = 5000
+        self.start_normal_loss = 3000
         
         super().__init__(parser, "Optimization Parameters")
 

@@ -126,3 +126,34 @@ def compute_normal_loss(pred_normal, ori_normal, mask=None):
         loss = loss[mask!=0]
 
     return loss.mean()
+
+def compute_depth_loss(pred_depth, gt_depth, mask=None, eps=1e-6):
+    """
+        pred_depth: (H, W)
+        gt_depth:   (H, W)
+        mask:       (H, W), 1 = hợp lệ, 0 = bỏ qua
+    """
+    pred_depth = pred_depth.float()
+    gt_depth = gt_depth.float()
+
+    valid = torch.isfinite(pred_depth) & torch.isfinite(gt_depth)
+    valid = valid & (pred_depth > 0) & (gt_depth > 0)
+
+    if mask is not None:
+        valid = valid & (mask > 0)
+
+    if valid.sum() == 0:
+        return torch.tensor(0.0, device=pred_depth.device, dtype=pred_depth.dtype)
+    
+    pred_valid = pred_depth[valid]
+    gt_valid = gt_depth[valid]
+
+    t_pred = torch.median(pred_valid)
+    s_pred = torch.mean(torch.abs(pred_valid - t_pred)).clamp_min(eps)
+    pred_norm = (pred_valid - t_pred) / s_pred
+
+    t_gt = torch.median(gt_valid)
+    s_gt = torch.mean(torch.abs(gt_valid - t_gt)).clamp_min(eps)
+    gt_norm = (gt_valid - t_gt) / s_gt
+
+    return torch.mean((pred_norm - gt_norm) ** 2)

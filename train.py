@@ -9,7 +9,7 @@
 #
 import torch
 from random import randint
-from utils.loss_utils import TV_loss, def_reg_loss, l1_loss, ssim, compute_normal_loss
+from utils.loss_utils import TV_loss, def_reg_loss, l1_loss, ssim, compute_normal_loss, compute_depth_loss
 from gaussian_renderer import render
 from gaussian_renderer import network_gui
 
@@ -180,19 +180,21 @@ def training(dataset, hyper, opt, pipe, args):
         # depth loss
         if opt.lambda_depth != 0 and viewpoint_cam.original_depth is not None:
             gt_depth = viewpoint_cam.original_depth.cuda().clone()
-            pred_depth = depth.clone()
+            pred_depth = depth[0].clone()
 
-            pred_depth[pred_depth != 0] = 1.0 / pred_depth[pred_depth != 0]
-            gt_depth[gt_depth != 0] = 1.0 / gt_depth[gt_depth != 0]
+            # pred_depth[pred_depth != 0] = 1.0 / pred_depth[pred_depth != 0]
+            # gt_depth[gt_depth != 0] = 1.0 / gt_depth[gt_depth != 0]
 
-            L_depth = l1_loss(pred_depth, gt_depth, mask)
+            # L_depth = l1_loss(pred_depth, gt_depth, mask)
+            L_depth = compute_depth_loss(pred_depth, gt_depth, mask[0])
             loss += opt.lambda_depth * L_depth
         else:
             L_depth = torch.tensor(0.0, device="cuda")
 
         # normal loss
-        if opt.lambda_normal != 0:
-            L_normal = opt.alpha_normal * compute_normal_loss(render_pkg["normal"], gt_normal) + (1 - opt.alpha_normal) * compute_normal_loss(render_pkg["normal_ref"], gt_normal)
+        if opt.lambda_normal != 0 and iteration > opt.start_normal_loss:
+            # L_normal = opt.alpha_normal * compute_normal_loss(render_pkg["normal"], gt_normal) + (1 - opt.alpha_normal) * compute_normal_loss(render_pkg["normal_ref"], gt_normal)
+            L_normal = compute_normal_loss(render_pkg["normal"], render_pkg["normal_ref"].detach())
             loss += opt.lambda_normal * L_normal
         else:
             L_normal = torch.tensor(0.0, device="cuda")
