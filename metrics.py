@@ -96,7 +96,7 @@ def readImages(renders_dir, gt_dir, depth_dir, gt_depth_dir, masks_dir, renders_
         
         image_names.append(fname)
 
-    return renders, gts, depths, gt_depths, masks, image_names
+    return renders, gts, depths, gt_depths, masks, image_names, renders_inpaint, gts_inpaint
 
 def evaluate(model_paths):
 
