@@ -100,9 +100,9 @@ def training(dataset, hyper, opt, pipe, args):
         randinteger = randint(0, len(viewpoint_stack)-1)
         viewpoint_cam = viewpoint_stack.pop(randinteger)
 
-        in_phase2 = iteration > opt.warmup
+        in_phase2 = iteration >= opt.warmup
 
-        # gaussians.set_requires_grad("xyz",       state=not in_phase2)
+        gaussians.set_requires_grad("xyz",       state=not in_phase2)
         # gaussians.set_requires_grad("opacity",   state=not in_phase2)
         # gaussians.set_requires_grad("scaling",   state=not in_phase2)
         # gaussians.set_requires_grad("rotation",  state=not in_phase2)
@@ -170,6 +170,10 @@ def training(dataset, hyper, opt, pipe, args):
                 loss += opt.lambda_final * opt.lambda_dssim * L_dssim_final
 
             if opt.lambda_inpaint_aux != 0:
+                L1_inpaint = (1 - opt.lambda_dssim) * L1_inpaint
+                if opt.lambda_dssim != 0:
+                    L_dssim_inpaint = 1.0 - ssim(render_inpaint, gt_inpaint_image, mask=mask)
+                    L1_inpaint += opt.lambda_dssim * L_dssim_inpaint
                 loss += opt.lambda_inpaint_aux * L1_inpaint
 
             Ll1 = L1_final
@@ -316,7 +320,7 @@ def training(dataset, hyper, opt, pipe, args):
             # -----------------------------------------------------------
 
             # Densification
-            if iteration < opt.densify_until_iter :
+            if iteration < opt.densify_until_iter and not in_phase2:
                 # Keep track of max radii in image-space for pruning
                 gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
                 gaussians.add_densification_stats(viewspace_point_tensor.grad, visibility_filter)
