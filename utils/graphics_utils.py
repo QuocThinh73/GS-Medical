@@ -146,3 +146,12 @@ def normal_from_depth_image(depth, intrinsic_matrix, extrinsic_matrix):
     xyz_normal = depth_pcd2normal(xyz_world)
 
     return xyz_normal
+
+def render_normal(depth, viewpoint_cam=None, intrinsic_matrix=None, extrinsic_matrix=None):
+    if viewpoint_cam is not None:
+        intrinsic_matrix, extrinsic_matrix = viewpoint_cam.get_calib_matrix_nerf()
+
+    normal_map = normal_from_depth_image(depth, intrinsic_matrix.to(device=depth.device, dtype=depth.dtype), extrinsic_matrix.to(device=depth.device, dtype=depth.dtype))
+    normal_map = normal_map.permute(2,0,1)
+
+    return normal_map

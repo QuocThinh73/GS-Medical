@@ -209,28 +209,16 @@ def process(folder_gt, folder_render, folder_mask, folder_out):
 
 
 if __name__ == "__main__":
-    root_dir = "output/exp34/EndoNeRF-EC/pulling_soft_tissues/video/ours_7000/"
+    root_dir = "output/exp/exp21/EndoNeRF/pulling_soft_tissues/test/ours_40000/"
     process(
         os.path.join(root_dir, "gt"),
-        os.path.join(root_dir, "ldr_from2d_renders"),
+        os.path.join(root_dir, "renders"),
         os.path.join(root_dir, "masks"),
-        os.path.join(root_dir, "errors_ldr_from2d"),
+        os.path.join(root_dir, "error_map", "final"),
     )
     process(
-        os.path.join(root_dir, "gt"),
-        os.path.join(root_dir, "ldr_from3d_renders"),
+        os.path.join(root_dir, "inpaint"),
+        os.path.join(root_dir, "renders_inpaint"),
         os.path.join(root_dir, "masks"),
-        os.path.join(root_dir, "errors_ldr_from3d"),
-    )
-    process(
-        os.path.join(root_dir, "normal_gt"),
-        os.path.join(root_dir, "consistent_ldr_from2d_renders"),
-        os.path.join(root_dir, "masks"),
-        os.path.join(root_dir, "errors_consistent_ldr_from2d"),
-    )
-    process(
-        os.path.join(root_dir, "normal_gt"),
-        os.path.join(root_dir, "consistent_ldr_from3d_renders"),
-        os.path.join(root_dir, "masks"),
-        os.path.join(root_dir, "errors_consistent_ldr_from3d"),
+        os.path.join(root_dir, "error_map", "inpaint"),
     )

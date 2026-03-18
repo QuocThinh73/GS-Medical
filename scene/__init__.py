@@ -82,7 +82,6 @@ class Scene:
         else:
             point_cloud_path = os.path.join(self.model_path, "point_cloud/iteration_{}".format(iteration))
         self.gaussians.save_ply(os.path.join(point_cloud_path, "point_cloud.ply"))
-        self.gaussians.save_ply_final_canonical(os.path.join(point_cloud_path, "point_cloud_final.ply"))
         # self.gaussians.save_deformation(point_cloud_path)
     
     def getTrainCameras(self, scale=1.0):

@@ -34,7 +34,6 @@ def l2_loss(network_output, gt, mask=None):
 
     return loss.mean()
 
-
 def gaussian(window_size, sigma):
     gauss = torch.Tensor([exp(-(x - window_size // 2) ** 2 / float(2 * sigma ** 2)) for x in range(window_size)])
     return gauss / gauss.sum()
@@ -115,25 +114,15 @@ def def_reg_loss(gs_can, d_xyz, d_rotation, d_scaling, K=5):
 
     return loss_pos, loss_cov
 
-def compute_normal_loss(normal, normal_ref, alpha=None):
-    """Computes the predicted normal supervision loss defined in ref-NeRF."""
-    # normal: (3, H, W), normal_ref: (3, H, W), alpha: (3, H, W)
-    if alpha is not None:
-        device = alpha.device
-        weight = alpha.detach().cpu().numpy()[0]
-        weight = (weight*255).astype(np.uint8)
+def compute_normal_loss(pred_normal, ori_normal, mask=None):
+    # pred_normal: (3, H, W), ori_normal: (3, H, W)
 
-        weight = erode(weight, erode_size=4)
+    pred_normal = pred_normal.permute(1, 2, 0).reshape(-1, 3)
+    ori_normal = ori_normal.permute(1, 2, 0).reshape(-1, 3).detach()
+    loss = (1.0 - torch.sum(pred_normal * ori_normal, axis=-1))
 
-        weight = torch.from_numpy(weight.astype(np.float32)/255.)
-        weight = weight[None,...].repeat(3,1,1)
-        weight = weight.to(device) 
-    else:
-        weight = torch.ones_like(normal_ref)
+    if mask is not None:
+        mask = mask.reshape(-1).to(loss.device)
+        loss = loss[mask!=0]
 
-    w = weight.permute(1,2,0).reshape(-1,3)[...,0].detach()
-    n = normal_ref.permute(1,2,0).reshape(-1,3).detach()
-    n_pred = normal.permute(1,2,0).reshape(-1,3)
-    loss = (w * (1.0 - torch.sum(n * n_pred, axis=-1))).mean()
-
-    return loss
+    return loss.mean()

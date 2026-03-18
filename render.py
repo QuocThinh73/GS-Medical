@@ -54,6 +54,8 @@ def render_set(model_path, name, opt, iteration, views, gaussians, pipeline, bac
     inpaint_path = os.path.join(model_path, name, "ours_{}".format(iteration), "inpaint")
     specular_mask_path = os.path.join(model_path, name, "ours_{}".format(iteration), "specular_masks")
     normal_ref_path = os.path.join(model_path, name, "ours_{}".format(iteration), "normal_ref")
+    render_normal_path = os.path.join(model_path, name, "ours_{}".format(iteration), "renders_normal")
+    normal_path = os.path.join(model_path, name, "ours_{}".format(iteration), "normal")
 
     makedirs(render_path, exist_ok=True)
     makedirs(render_inpaint_path, exist_ok=True)
@@ -64,6 +66,8 @@ def render_set(model_path, name, opt, iteration, views, gaussians, pipeline, bac
     makedirs(inpaint_path, exist_ok=True)
     makedirs(specular_mask_path, exist_ok=True)
     makedirs(normal_ref_path, exist_ok=True)
+    makedirs(render_normal_path, exist_ok=True)
+    makedirs(normal_path, exist_ok=True)
     
     render_images = []
     render_inpaints = []
@@ -74,6 +78,10 @@ def render_set(model_path, name, opt, iteration, views, gaussians, pipeline, bac
     inpaints = []
     specular_masks = []
     normal_refs = []
+    render_normals = []
+    normals = []
+
+    use_render_final = iteration >= opt.warmup
 
     for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
         stage = 'coarse' if no_fine else 'fine'
@@ -87,14 +95,11 @@ def render_set(model_path, name, opt, iteration, views, gaussians, pipeline, bac
 
         render_depths.append(rendering["depth"].cpu())
         render_inpaints.append(rendering["render_inpaint"].cpu())
-        normal_refs.append(rendering["normal_ref"].cpu())
-
-        use_render_final = (iteration >= opt.warmup) and ("render_final" in rendering)
 
         if use_render_final:
             render_images.append(rendering["render_final"].cpu())
-        else:
-            render_images.append(rendering["render_inpaint"].cpu())
+            normal_refs.append(rendering["normal_ref"].cpu())
+            render_normals.append(rendering["normal"].cpu())
 
         if name in ["train", "test", "video"]:
             gt = view.original_image[0:3, :, :]
@@ -107,6 +112,8 @@ def render_set(model_path, name, opt, iteration, views, gaussians, pipeline, bac
             inpaints.append(inpaint)
             specular_mask = view.specular_mask
             specular_masks.append(specular_mask)
+            normal = view.original_normal
+            normals.append(normal)
 
     # if render_test:
     #     test_times = 20
@@ -135,11 +142,33 @@ def render_set(model_path, name, opt, iteration, views, gaussians, pipeline, bac
             torchvision.utils.save_image(image, os.path.join(inpaint_path, '{0:05d}'.format(count) + ".png"))
             count+=1
 
+    if use_render_final:
+        count = 0
+        print("writing rendering images.")
+        if len(render_images) != 0:
+            for image in tqdm(render_images):
+                torchvision.utils.save_image(image, os.path.join(render_path, '{0:05d}'.format(count) + ".png"))
+                count +=1
+
+        count = 0
+        print("writing normal_refs images.")
+        if len(normal_refs) != 0:
+            for image in tqdm(normal_refs):
+                torchvision.utils.save_image(image, os.path.join(normal_ref_path, '{0:05d}'.format(count) + ".png"))
+                count+=1
+
+        count = 0
+        print("writing rendering normals images.")
+        if len(render_normals) != 0:
+            for image in tqdm(render_normals):
+                torchvision.utils.save_image(image, os.path.join(render_normal_path, '{0:05d}'.format(count) + ".png"))
+                count+=1
+    
     count = 0
-    print("writing inpaint images.")
-    if len(normal_refs) != 0:
-        for image in tqdm(normal_refs):
-            torchvision.utils.save_image(image, os.path.join(normal_ref_path, '{0:05d}'.format(count) + ".png"))
+    print("writing normal images.")
+    if len(normals) != 0:
+        for image in tqdm(normals):
+            torchvision.utils.save_image(image, os.path.join(normal_path, '{0:05d}'.format(count) + ".png"))
             count+=1
 
     count = 0
@@ -149,13 +178,6 @@ def render_set(model_path, name, opt, iteration, views, gaussians, pipeline, bac
             image = image.float()
             torchvision.utils.save_image(image, os.path.join(specular_mask_path, '{0:05d}'.format(count) + ".png"))
             count+=1
-            
-    count = 0
-    print("writing rendering images.")
-    if len(render_images) != 0:
-        for image in tqdm(render_images):
-            torchvision.utils.save_image(image, os.path.join(render_path, '{0:05d}'.format(count) + ".png"))
-            count +=1
 
     count = 0
     print("writing rendering inpaint images.")
@@ -187,10 +209,12 @@ def render_set(model_path, name, opt, iteration, views, gaussians, pipeline, bac
             image = image.cpu().squeeze().numpy().astype(np.uint8)
             cv2.imwrite(os.path.join(gt_depth_path, '{0:05d}'.format(count) + ".png"), image)
             count += 1
-            
-    render_array = torch.stack(render_images, dim=0).permute(0, 2, 3, 1)
-    render_array = (render_array*255).clip(0, 255).cpu().numpy().astype(np.uint8) # BxHxWxC
-    imageio.mimwrite(os.path.join(model_path, name, "ours_{}".format(iteration), 'ours_video.mp4'), render_array, fps=30, quality=8)
+
+    if use_render_final:
+
+        render_array = torch.stack(render_images, dim=0).permute(0, 2, 3, 1)
+        render_array = (render_array*255).clip(0, 255).cpu().numpy().astype(np.uint8) # BxHxWxC
+        imageio.mimwrite(os.path.join(model_path, name, "ours_{}".format(iteration), 'ours_final_video.mp4'), render_array, fps=30, quality=8)
 
     render_array = torch.stack(render_inpaints, dim=0).permute(0, 2, 3, 1)
     render_array = (render_array*255).clip(0, 255).cpu().numpy().astype(np.uint8) # BxHxWxC
@@ -275,7 +299,7 @@ if __name__ == "__main__":
     pipeline = PipelineParams(parser)
     hyperparam = FDMHiddenParams(parser)
     op = OptimizationParams(parser)
-    parser.add_argument("--iteration", default=1000, type=int)
+    parser.add_argument("--iteration", default=3000, type=int)
     parser.add_argument("--skip_train", action="store_true")
     parser.add_argument("--skip_test", action="store_true")
     parser.add_argument("--quiet", action="store_true")

@@ -12,7 +12,7 @@
 import torch
 from torch import nn
 import numpy as np
-from utils.graphics_utils import getWorld2View2, getProjectionMatrix, getProjectionMatrix2, fov2focal
+from utils.graphics_utils import getWorld2View2, getProjectionMatrix, getProjectionMatrix2, fov2focal, render_normal
 
 
 class Camera(nn.Module):
@@ -74,6 +74,8 @@ class Camera(nn.Module):
         
         self.full_proj_transform = (self.world_view_transform.unsqueeze(0).bmm(self.projection_matrix.unsqueeze(0))).squeeze(0)
         self.camera_center = self.world_view_transform.inverse()[3, :3]
+        self.intrinsic_matrix, self.extrinsic_matrix = self.get_calib_matrix_nerf()
+        self.original_normal = render_normal(self.original_depth, None, self.intrinsic_matrix, self.extrinsic_matrix)
 
     def get_calib_matrix_nerf(self):
         focal = fov2focal(self.FoVx, self.image_width)  # original focal length

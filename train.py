@@ -9,7 +9,7 @@
 #
 import torch
 from random import randint
-from utils.loss_utils import TV_loss, def_reg_loss, l1_loss, ssim
+from utils.loss_utils import TV_loss, def_reg_loss, l1_loss, ssim, compute_normal_loss
 from gaussian_renderer import render
 from gaussian_renderer import network_gui
 
@@ -125,6 +125,7 @@ def training(dataset, hyper, opt, pipe, args):
         gt_image = viewpoint_cam.original_image.cuda()
         gt_inpaint_image = viewpoint_cam.inpaint_image.cuda()
         mask = viewpoint_cam.mask.cuda()
+        gt_normal = viewpoint_cam.original_normal.cuda()
 
         render_inpaint = render_pkg["render_inpaint"]
         depth = render_pkg["depth"]
@@ -188,6 +189,13 @@ def training(dataset, hyper, opt, pipe, args):
             loss += opt.lambda_depth * L_depth
         else:
             L_depth = torch.tensor(0.0, device="cuda")
+
+        # normal loss
+        if opt.lambda_normal != 0:
+            L_normal = opt.alpha_normal * compute_normal_loss(render_pkg["normal"], gt_normal) + (1 - opt.alpha_normal) * compute_normal_loss(render_pkg["normal_ref"], gt_normal)
+            loss += opt.lambda_normal * L_normal
+        else:
+            L_normal = torch.tensor(0.0, device="cuda")
 
         # TV loss
         if opt.lambda_tv_image != 0:
@@ -274,6 +282,7 @@ def training(dataset, hyper, opt, pipe, args):
                         f"L1 inpaint: {((1.0 - opt.lambda_dssim) * L1_inpaint).item():.7f}, "
                         f"L_dssim_inpaint: {(opt.lambda_dssim * L_dssim_inpaint).item() if opt.lambda_dssim != 0 else 0:.7f}, "
                         f"L_depth: {(opt.lambda_depth * L_depth).item() if opt.lambda_depth != 0 else 0:.7f}, "
+                        f"L_normal: {(opt.lambda_normal * L_normal).item() if opt.lambda_normal != 0 else 0:.7f}, "
                         f"L_tv_image: {(opt.lambda_tv_image * L_tv_image).item() if opt.lambda_tv_image != 0 else 0:.7f}, "
                         f"L_tv_depth: {(opt.lambda_tv_depth * L_tv_depth).item() if opt.lambda_tv_depth != 0 else 0:.7f}, "
                         f"L_def_reg_pos: {(opt.lambda_def_reg_pos * loss_pos).item() if opt.lambda_def_reg_pos != 0 else 0:.7f}, "
@@ -290,6 +299,7 @@ def training(dataset, hyper, opt, pipe, args):
                         f"L_dssim_final: {(opt.lambda_final * opt.lambda_dssim * L_dssim_final).item() if opt.lambda_dssim != 0 else 0:.7f}, "
                         f"L1 inpaint aux: {(opt.lambda_inpaint_aux * L1_inpaint).item() if opt.lambda_inpaint_aux != 0 else 0:.7f}, "
                         f"L_depth: {(opt.lambda_depth * L_depth).item() if opt.lambda_depth != 0 else 0:.7f}, "
+                        f"L_normal: {(opt.lambda_normal * L_normal).item() if opt.lambda_normal != 0 else 0:.7f}, "
                         f"L_tv_image: {(opt.lambda_tv_image * L_tv_image).item() if opt.lambda_tv_image != 0 else 0:.7f}, "
                         f"L_tv_depth: {(opt.lambda_tv_depth * L_tv_depth).item() if opt.lambda_tv_depth != 0 else 0:.7f}, "
                         f"L_def_reg_pos: {(opt.lambda_def_reg_pos * loss_pos).item() if opt.lambda_def_reg_pos != 0 else 0:.7f}, "
@@ -350,9 +360,9 @@ if __name__ == "__main__":
     parser.add_argument('--port', type=int, default=6009)
     parser.add_argument('--debug_from', type=int, default=-1)
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
-    parser.add_argument("--test_iterations", nargs="+", type=int, default=[i*500 for i in range(0, 100)])
-    parser.add_argument("--save_iterations", nargs="+", type=int, default=[i*500 for i in range(0, 100)])
-    parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[i*500 for i in range(0, 100)])
+    parser.add_argument("--test_iterations", nargs="+", type=int, default=[i*1000 for i in range(0, 100)])
+    parser.add_argument("--save_iterations", nargs="+", type=int, default=[i*1000 for i in range(0, 100)])
+    parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[i*1000 for i in range(0, 100)])
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--start_checkpoint", type=str, default = None)
     parser.add_argument("--expname", type=str, default = "endonerf/pulling_soft_tissues")
