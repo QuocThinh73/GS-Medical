@@ -17,6 +17,14 @@ from pytorch3d.ops.knn import knn_points
 from utils.image_utils import erode
 
 
+def weighted_l1_loss(network_output, gt, weight, mask=None):
+    loss = torch.abs((network_output - gt) * weight)
+    if mask is not None:
+        mask = mask.repeat(network_output.shape[0], 1, 1)
+        loss = loss[mask!=0]
+
+    return loss.mean()
+
 def l1_loss(network_output, gt, mask=None):
     loss = torch.abs((network_output - gt))
     if mask is not None:
@@ -94,12 +102,72 @@ def TV_loss(x):
     tv_w = torch.abs(x[:, :, 1:] - x[:, :, :-1]).sum()
     return (tv_h + tv_w) / (C * H * W)
 
+def surface_loss(gs_can, d_xyz, d_rotation, d_scaling, viewdir, K=5):
+    """
+    Args:
+        gs_can: GaussianModel
+        d_xyz:       (N, 3)
+        d_rotation:  (N, ?)
+        d_scaling:   (N, ?)
+        viewdir:     (N, 3) hoặc broadcast-compatible
+        K: số lượng neighbor
+
+    Returns:
+        loss_pos:    scalar
+        loss_cov:    scalar
+        loss_normal: scalar
+    """
+
+    # 1. Vị trí trong observed space
+    xyz = gs_can.get_xyz + d_xyz                          # (N, 3)
+    cov = gs_can.get_covariance_obs(d_rotation, d_scaling)
+
+    # 2. Normal trong observed space
+    normal = gs_can.get_normal(d_scaling, d_rotation, viewdir)   # (N, 3)
+
+    # 3. KNN theo vị trí
+    _, nn_ix, _ = knn_points(
+        xyz.unsqueeze(0), xyz.unsqueeze(0), K=K+1, return_sorted=True
+    )
+    nn_ix = nn_ix.squeeze(0)[:, 1:]   # (N, K), bỏ chính nó
+
+    # =========================================================
+    # Position loss
+    # =========================================================
+    nn_xyz = xyz[nn_ix]               # (N, K, 3)
+    center_xyz = xyz.unsqueeze(1)     # (N, 1, 3)
+    loss_pos = ((center_xyz - nn_xyz) ** 2).sum(dim=-1).mean()
+
+    # =========================================================
+    # Covariance loss
+    # =========================================================
+    nn_cov = cov[nn_ix]               # (N, K, D)
+    center_cov = cov.unsqueeze(1)     # (N, 1, D)
+    loss_cov = F.l1_loss(center_cov.expand_as(nn_cov), nn_cov)
+
+    # =========================================================
+    # Normal consistency loss
+    # =========================================================
+    nn_normal = normal[nn_ix]                     # (N, K, 3)
+    center_normal = normal.unsqueeze(1)           # (N, 1, 3)
+
+    # cosine similarity: càng gần 1 càng tốt
+    cos_sim = (center_normal * nn_normal).sum(dim=-1)   # (N, K)
+
+    # do đã flip_align_view nên thường có thể dùng trực tiếp 1 - cos
+    loss_normal = (1.0 - cos_sim).mean()
+
+    return loss_pos, loss_cov, loss_normal
+
 def def_reg_loss(gs_can, d_xyz, d_rotation, d_scaling, K=5):
     xyz_can = gs_can.get_xyz
     xyz_obs = xyz_can + d_xyz
 
-    cov_can = gs_can.get_covariance()
-    cov_obs = gs_can.get_covariance_obs(d_rotation, d_scaling)
+    # cov_can = gs_can.get_covariance()
+    # cov_obs = gs_can.get_covariance_obs(d_rotation, d_scaling)
+
+    scaling_can = gs_can.get_scaling()
+    scaling_obs = scaling_can + d_scaling
 
     _, nn_ix, _ = knn_points(xyz_can.unsqueeze(0), xyz_can.unsqueeze(0), K=K, return_sorted=True)
     nn_ix = nn_ix.squeeze(0)
@@ -108,11 +176,15 @@ def def_reg_loss(gs_can, d_xyz, d_rotation, d_scaling, K=5):
     dis_xyz_obs = torch.cdist(xyz_obs.unsqueeze(1), xyz_obs[nn_ix])[:, 0, 1:]
     loss_pos = F.l1_loss(dis_xyz_can, dis_xyz_obs)
 
-    dis_cov_can = torch.cdist(cov_can.unsqueeze(1), cov_can[nn_ix])[:, 0, 1:]
-    dis_cov_obs = torch.cdist(cov_obs.unsqueeze(1), cov_obs[nn_ix])[:, 0, 1:]
-    loss_cov = F.l1_loss(dis_cov_can, dis_cov_obs)
+    # dis_cov_can = torch.cdist(cov_can.unsqueeze(1), cov_can[nn_ix])[:, 0, 1:]
+    # dis_cov_obs = torch.cdist(cov_obs.unsqueeze(1), cov_obs[nn_ix])[:, 0, 1:]
+    # loss_cov = F.l1_loss(dis_cov_can, dis_cov_obs)
 
-    return loss_pos, loss_cov
+    dis_scaling_can = torch.cdist(scaling_can.unsqueeze(1), scaling_can[nn_ix])[:, 0, 1:]
+    dis_scaling_obs = torch.cdist(scaling_obs.unsqueeze(1), scaling_obs[nn_ix])[:, 0, 1:]
+    loss_scaling = F.l1_loss(dis_scaling_can, dis_scaling_obs)
+
+    return loss_pos, loss_scaling
 
 def compute_normal_loss(pred_normal, ori_normal, mask=None):
     # pred_normal: (3, H, W), ori_normal: (3, H, W)

@@ -16,7 +16,7 @@ from utils.graphics_utils import getWorld2View2, getProjectionMatrix, getProject
 
 
 class Camera(nn.Module):
-    def __init__(self, colmap_id, R, T, FoVx, FoVy, image, inpaint_image, depth, mask, specular_mask, gt_alpha_mask,
+    def __init__(self, colmap_id, R, T, FoVx, FoVy, image, inpaint_image, depth, mask, specular_mask, final_conf, gt_alpha_mask,
                  image_name, uid,
                  trans=np.array([0.0, 0.0, 0.0]), scale=1.0, 
                  data_device = "cuda", time = 0, Znear=None, Zfar=None, 
@@ -34,6 +34,7 @@ class Camera(nn.Module):
         self.time = time
         self.mask = mask
         self.specular_mask = specular_mask
+        self.final_conf = final_conf
         try:
             self.data_device = torch.device(data_device)
         except Exception as e:

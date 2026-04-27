@@ -48,16 +48,21 @@ do
     #########################
     # 2. RENDER
     #########################
-    echo "[2/3] Rendering..."
-    for iter in $(seq 0 1000 30000)
-    do
-        echo "Rendering iteration $iter"
-        python render.py \
-            --model_path "$MODEL_PATH" \
-            --iteration $iter \
-            --skip_train \
-            --skip_video
-    done
+    # echo "[2/3] Rendering..."
+    python render.py \
+    --model_path "$MODEL_PATH" \
+    --iteration 10000 \
+    --skip_train \
+    --skip_video
+    # for iter in $(seq 0 1000 10000)
+    # do
+    #     echo "Rendering iteration $iter"
+    #     python render.py \
+    #         --model_path "$MODEL_PATH" \
+    #         --iteration $iter \
+    #         --skip_train \
+    #         --skip_video
+    # done
 
     #########################
     # 3. EVALUATION

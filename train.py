@@ -9,7 +9,7 @@
 #
 import torch
 from random import randint
-from utils.loss_utils import TV_loss, def_reg_loss, l1_loss, ssim, compute_normal_loss, compute_depth_loss
+from utils.loss_utils import TV_loss, def_reg_loss, l1_loss, ssim, compute_normal_loss, compute_depth_loss, weighted_l1_loss, surface_loss
 from gaussian_renderer import render
 from gaussian_renderer import network_gui
 
@@ -99,11 +99,12 @@ def training(dataset, hyper, opt, pipe, args):
             viewpoint_stack = scene.getTrainCameras().copy()
         randinteger = randint(0, len(viewpoint_stack)-1)
         viewpoint_cam = viewpoint_stack.pop(randinteger)
+            
+        # in_phase2 = iteration >= opt.warmup and iteration < opt.warmup2
+        # in_phase3 = iteration >= opt.warmup2 and iteration < opt.warmup3
 
-        in_phase2 = iteration >= opt.warmup
-
-        gaussians.set_requires_grad("xyz",       state=not in_phase2)
-        # gaussians.set_requires_grad("opacity",   state=not in_phase2)
+        # gaussians.set_requires_grad("xyz",       state=not (in_phase2 and in_phase3))
+        # gaussians.set_requires_grad("opacity",   state=not (in_phase2 and in_phase3))
         # gaussians.set_requires_grad("scaling",   state=not in_phase2)
         # gaussians.set_requires_grad("rotation",  state=not in_phase2)
 
@@ -133,11 +134,11 @@ def training(dataset, hyper, opt, pipe, args):
         visibility_filter = render_pkg["visibility_filter"]
         radii = render_pkg["radii"]
 
-        # luôn có inpaint
-        L1_inpaint = l1_loss(render_inpaint, gt_inpaint_image, mask)
+        # L1_inpaint = l1_loss(render_inpaint, gt_inpaint_image, mask)
+        L1_inpaint = weighted_l1_loss(render_inpaint, gt_inpaint_image, 1 + viewpoint_cam.final_conf.cuda(), mask)
+        # L1_inpaint = torch.tensor(0.0, device="cuda")
         psnr_inpaint = psnr(render_inpaint, gt_inpaint_image, mask).mean().double()
 
-        # khởi tạo mặc định để tránh lỗi log/print
         L1_final = torch.tensor(0.0, device="cuda")
         psnr_final = torch.tensor(0.0, device="cuda")
         L_dssim_inpaint = torch.tensor(0.0, device="cuda")
@@ -160,7 +161,8 @@ def training(dataset, hyper, opt, pipe, args):
             # phase 2
             render_final = render_pkg["render_final"]
 
-            L1_final = l1_loss(render_final, gt_image, mask)
+            # L1_final = l1_loss(render_final, gt_image, mask)
+            L1_final = weighted_l1_loss(render_final, gt_image, 1 + viewpoint_cam.final_conf.cuda(), mask)
             psnr_final = psnr(render_final, gt_image, mask).mean().double()
 
             loss = opt.lambda_final * (1.0 - opt.lambda_dssim) * L1_final
@@ -189,7 +191,8 @@ def training(dataset, hyper, opt, pipe, args):
             pred_depth[pred_depth != 0] = 1.0 / pred_depth[pred_depth != 0]
             gt_depth[gt_depth != 0] = 1.0 / gt_depth[gt_depth != 0]
 
-            L_depth = l1_loss(pred_depth, gt_depth, mask)
+            # L_depth = l1_loss(pred_depth, gt_depth, mask)
+            L_depth = weighted_l1_loss(pred_depth, gt_depth, 1.0 - viewpoint_cam.final_conf.cuda(), mask)
             # L_depth = compute_depth_loss(pred_depth, gt_depth, mask[0])
             loss += opt.lambda_depth * L_depth
         else:
@@ -217,13 +220,20 @@ def training(dataset, hyper, opt, pipe, args):
             L_tv_depth = torch.tensor(0.0, device="cuda")
 
         # deformation regularization
-        loss_pos, loss_cov = def_reg_loss(scene.gaussians, d_xyz, d_rotations, d_scales)
+        # loss_pos, loss_cov = def_reg_loss(scene.gaussians, d_xyz, d_rotations, d_scales)
+        # surf_loss = surface_loss(gaussians, d_xyz)
+        # if opt.lambda_def_reg_pos != 0:
+        #     loss += opt.lambda_def_reg_pos * surf_loss
 
-        if opt.lambda_def_reg_pos != 0:
-            loss += opt.lambda_def_reg_pos * loss_pos
+        # loss_pos, loss_cov, loss_normal = surface_loss(scene.gaussians, d_xyz, d_rotations, d_scales, viewpoint_cam.camera_center.cuda())
+        # if opt.lambda_def_reg_pos != 0:
+        #     loss += opt.lambda_def_reg_pos * loss_pos
 
-        if opt.lambda_def_reg_cov != 0:
-            loss += opt.lambda_def_reg_cov * loss_cov
+        # if opt.lambda_def_reg_cov != 0:
+        #     loss += opt.lambda_def_reg_cov * loss_cov
+
+        # if opt.lambda_def_reg_pos != 0:
+        #     loss += opt.lambda_def_reg_pos * loss_normal
 
         sys_exit = False
         if loss.isnan():
@@ -291,8 +301,9 @@ def training(dataset, hyper, opt, pipe, args):
                         f"L_normal: {(opt.lambda_normal * L_normal).item() if opt.lambda_normal != 0 else 0:.7f}, "
                         f"L_tv_image: {(opt.lambda_tv_image * L_tv_image).item() if opt.lambda_tv_image != 0 else 0:.7f}, "
                         f"L_tv_depth: {(opt.lambda_tv_depth * L_tv_depth).item() if opt.lambda_tv_depth != 0 else 0:.7f}, "
-                        f"L_def_reg_pos: {(opt.lambda_def_reg_pos * loss_pos).item() if opt.lambda_def_reg_pos != 0 else 0:.7f}, "
-                        f"L_def_reg_cov: {(opt.lambda_def_reg_cov * loss_cov).item() if opt.lambda_def_reg_cov != 0 else 0:.7f}"
+                        # f"L_def_reg_pos: {(opt.lambda_def_reg_pos * loss_normal).item() if opt.lambda_def_reg_pos != 0 else 0:.7f}, "
+                        # f"L_def_reg_cov: {(opt.lambda_def_reg_cov * loss_cov).item() if opt.lambda_def_reg_cov != 0 else 0:.7f}"
+                        # f"L_surface: {(opt.lambda_def_reg_pos * surf_loss).item() if opt.lambda_def_reg_pos != 0 else 0:.7f}, "
                     )
                 else:
                     print(
@@ -308,8 +319,9 @@ def training(dataset, hyper, opt, pipe, args):
                         f"L_normal: {(opt.lambda_normal * L_normal).item() if opt.lambda_normal != 0 else 0:.7f}, "
                         f"L_tv_image: {(opt.lambda_tv_image * L_tv_image).item() if opt.lambda_tv_image != 0 else 0:.7f}, "
                         f"L_tv_depth: {(opt.lambda_tv_depth * L_tv_depth).item() if opt.lambda_tv_depth != 0 else 0:.7f}, "
-                        f"L_def_reg_pos: {(opt.lambda_def_reg_pos * loss_pos).item() if opt.lambda_def_reg_pos != 0 else 0:.7f}, "
-                        f"L_def_reg_cov: {(opt.lambda_def_reg_cov * loss_cov).item() if opt.lambda_def_reg_cov != 0 else 0:.7f}"
+                        # f"L_def_reg_pos: {(opt.lambda_def_reg_pos * loss_normal).item() if opt.lambda_def_reg_pos != 0 else 0:.7f}, "
+                        # f"L_def_reg_cov: {(opt.lambda_def_reg_cov * loss_cov).item() if opt.lambda_def_reg_cov != 0 else 0:.7f}"
+                        # f"L_surface: {(opt.lambda_def_reg_pos * surf_loss).item() if opt.lambda_def_reg_pos != 0 else 0:.7f}, "
                     )
 
             if sys_exit:
@@ -320,7 +332,8 @@ def training(dataset, hyper, opt, pipe, args):
             # -----------------------------------------------------------
 
             # Densification
-            if iteration < opt.densify_until_iter and not in_phase2:
+            # if iteration < opt.densify_until_iter and not in_phase2:
+            if iteration < opt.densify_until_iter:
                 # Keep track of max radii in image-space for pruning
                 gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
                 gaussians.add_densification_stats(viewspace_point_tensor.grad, visibility_filter)
@@ -333,7 +346,7 @@ def training(dataset, hyper, opt, pipe, args):
                     gaussians.densify(densify_threshold, opacity_threshold, scene.cameras_extent, size_threshold)
                     
                 if iteration > opt.pruning_from_iter and iteration % opt.pruning_interval == 0:
-                    size_threshold = 40 if iteration > opt.opacity_reset_interval else None
+                    size_threshold = 20 if iteration > opt.opacity_reset_interval else None
                     gaussians.prune(densify_threshold, opacity_threshold, scene.cameras_extent, size_threshold)
                     
                 if iteration % opt.opacity_reset_interval == 0 or (dataset.white_background and iteration == opt.densify_from_iter):

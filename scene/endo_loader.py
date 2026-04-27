@@ -167,15 +167,17 @@ class EndoNeRF_Dataset(object):
         agg_fn = lambda filetype: sorted(glob.glob(os.path.join(self.root_dir, filetype, "*.png")))
         self.image_paths = agg_fn("images")
         self.inpaint_image_paths = agg_fn("inpaint_images")
-        self.depth_paths = agg_fn("dam_depths")
+        self.depth_paths = agg_fn("depths")
         self.masks_paths = agg_fn("masks")
         self.specular_mask_paths = agg_fn("specular_masks")
+        self.final_conf_paths = agg_fn("final_conf")
 
         assert len(self.image_paths) == poses.shape[0], "the number of images should equal to the number of poses"
         assert len(self.inpaint_image_paths) == poses.shape[0], "the number of inpaint images should equal to the number of poses"
         assert len(self.depth_paths) == poses.shape[0], "the number of depth images should equal to number of poses"
         assert len(self.masks_paths) == poses.shape[0], "the number of masks should equal to the number of poses"
         assert len(self.specular_mask_paths) == poses.shape[0], "the number of specular masks should equal to the number of poses"
+        assert len(self.final_conf_paths) == poses.shape[0], "the number of confidence maps should equal to the number of poses"
 
     def format_infos(self, split):
         cameras = []
@@ -204,6 +206,11 @@ class EndoNeRF_Dataset(object):
             specular_mask = 1 - np.array(specular_mask) / 255.0
             specular_mask = self.transform(specular_mask).bool()
 
+            # confidence maps
+            final_conf_path = self.final_conf_paths[idx]
+            final_conf = np.array(Image.open(final_conf_path)).astype(np.float32) / 255.0
+            final_conf = self.transform(final_conf)   # shape [1, H, W]
+
             # depth
             depth_path = self.depth_paths[idx]
             depth = np.array(Image.open(depth_path))
@@ -230,7 +237,7 @@ class EndoNeRF_Dataset(object):
             FovX = focal2fov(self.focal[0], self.img_wh[0])
             FovY = focal2fov(self.focal[1], self.img_wh[1])
 
-            cameras.append(Camera(colmap_id=idx, R=R, T=T, FoVx=FovX, FoVy=FovY, image=image, inpaint_image=inpaint_image, depth=depth, mask=mask, specular_mask=specular_mask, gt_alpha_mask=None,
+            cameras.append(Camera(colmap_id=idx, R=R, T=T, FoVx=FovX, FoVy=FovY, image=image, inpaint_image=inpaint_image, depth=depth, mask=mask, specular_mask=specular_mask, final_conf=final_conf, gt_alpha_mask=None,
                           image_name=f"{idx}", uid=idx, data_device=torch.device("cuda"), time=time,
                           Znear=None, Zfar=None, K=self.K, h=self.img_wh[1], w=self.img_wh[0]))
         return cameras
@@ -252,18 +259,22 @@ class EndoNeRF_Dataset(object):
         depth_mask[np.bitwise_and(depth<close_depth, depth!=0)] = 0
         depth_mask[depth==0] = 0
         depth[depth_mask==0] = 0
-        if 'stereo_' in self.root_dir:
+        specular_mask = 1 - np.array(Image.open(self.specular_mask_paths[0])) / 255.0
+        if 'stereomis' in self.root_dir.lower():
             mask = np.array(Image.open(self.masks_paths[0]))
             if len(mask.shape) > 2:
                 mask = (mask[..., 0]>0).astype(np.uint8) 
         else:
             mask = 1 - np.array(Image.open(self.masks_paths[0]))/255.0
-        mask = np.logical_and(depth_mask, mask)   
-        color = np.array(Image.open(self.image_paths[0]))/255.0
-        # color_uint8 = np.array(Image.open(self.image_paths[0]), dtype=np.uint8)
-        # filling_mask = np.logical_not(mask)
+        mask = np.logical_and(depth_mask, mask)
+        
+        color = np.array(Image.open(self.inpaint_image_paths[0]))/255.0
+
+        color_uint8 = np.array(Image.open(self.inpaint_image_paths[0]), dtype=np.uint8)
+        filling_mask = np.logical_not(specular_mask)
         # color, depth = self.filling_pts_colors(ref_image=color_uint8, ref_depth=depth, filling_mask=filling_mask)
         # color = color/255.0
+        _, depth = self.filling_pts_colors(ref_image=color_uint8, ref_depth=depth, filling_mask=filling_mask)
         
         pts, colors, _ = self.get_pts_cam(depth, mask, color, disable_mask=False)
         c2w = self.get_camera_poses((R, T))
