@@ -1,7 +1,7 @@
-conda create -n GS-Medical python=3.9
+conda create -n GS-Medical python=3.9 -y
 conda activate GS-Medical
-conda install cudatoolkit=11.8
-conda install nvidia/label/cuda-11.8.0::cuda-toolkit
+conda install cudatoolkit=11.8 -y
+conda install nvidia/label/cuda-11.8.0::cuda-toolkit -y
 export CUDA_HOME="$CONDA_PREFIX"
 export PATH="$CONDA_PREFIX/bin:$PATH"
 export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$CONDA_PREFIX/lib64:$LD_LIBRARY_PATH"

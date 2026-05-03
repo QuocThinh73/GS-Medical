@@ -99,14 +99,6 @@ def training(dataset, hyper, opt, pipe, args):
             viewpoint_stack = scene.getTrainCameras().copy()
         randinteger = randint(0, len(viewpoint_stack)-1)
         viewpoint_cam = viewpoint_stack.pop(randinteger)
-            
-        # in_phase2 = iteration >= opt.warmup and iteration < opt.warmup2
-        # in_phase3 = iteration >= opt.warmup2 and iteration < opt.warmup3
-
-        # gaussians.set_requires_grad("xyz",       state=not (in_phase2 and in_phase3))
-        # gaussians.set_requires_grad("opacity",   state=not (in_phase2 and in_phase3))
-        # gaussians.set_requires_grad("scaling",   state=not in_phase2)
-        # gaussians.set_requires_grad("rotation",  state=not in_phase2)
 
         # -----------------------------------------------------------
         # Rendering
@@ -118,7 +110,7 @@ def training(dataset, hyper, opt, pipe, args):
         ori_time = torch.tensor(viewpoint_cam.time).to(gaussians.get_xyz.device)
         d_xyz, d_scales, d_rotations = gaussians.deformation(ori_time)
 
-        render_pkg = render(viewpoint_cam, gaussians, pipe, background, d_xyz, d_scales, d_rotations, iteration, opt)
+        render_pkg = render(viewpoint_cam, gaussians, pipe, background, d_xyz, d_scales, d_rotations)
         
         # -----------------------------------------------------------
         # Loss computation
@@ -129,6 +121,7 @@ def training(dataset, hyper, opt, pipe, args):
         gt_normal = viewpoint_cam.original_normal.cuda()
 
         render_inpaint = render_pkg["render_inpaint"]
+        render_final = render_pkg["render_final"]
         depth = render_pkg["depth"]
         viewspace_point_tensor = render_pkg["viewspace_points"]
         visibility_filter = render_pkg["visibility_filter"]
@@ -139,49 +132,16 @@ def training(dataset, hyper, opt, pipe, args):
         # L1_inpaint = torch.tensor(0.0, device="cuda")
         psnr_inpaint = psnr(render_inpaint, gt_inpaint_image, mask).mean().double()
 
-        L1_final = torch.tensor(0.0, device="cuda")
-        psnr_final = torch.tensor(0.0, device="cuda")
-        L_dssim_inpaint = torch.tensor(0.0, device="cuda")
-        L_dssim_final = torch.tensor(0.0, device="cuda")
+        # L1_final = l1_loss(render_final, gt_image, mask)
+        L1_final = weighted_l1_loss(render_final, gt_image, 1 + viewpoint_cam.final_conf.cuda(), mask)
+        psnr_final = psnr(render_final, gt_image, mask).mean().double()
 
-        if iteration < opt.warmup:
-            # phase 1
-            loss = (1.0 - opt.lambda_dssim) * L1_inpaint
+        loss = opt.lambda_final * L1_final + opt.lambda_inpaint * L1_inpaint
 
-            if opt.lambda_dssim != 0:
-                L_dssim_inpaint = 1.0 - ssim(render_inpaint, gt_inpaint_image, mask=mask)
-                loss += opt.lambda_dssim * L_dssim_inpaint
-
-            Ll1 = L1_inpaint
-            image_for_log = render_inpaint
-            gt_for_log = gt_inpaint_image
-            psnr_log = psnr_inpaint
-
-        else:
-            # phase 2
-            render_final = render_pkg["render_final"]
-
-            # L1_final = l1_loss(render_final, gt_image, mask)
-            L1_final = weighted_l1_loss(render_final, gt_image, 1 + viewpoint_cam.final_conf.cuda(), mask)
-            psnr_final = psnr(render_final, gt_image, mask).mean().double()
-
-            loss = opt.lambda_final * (1.0 - opt.lambda_dssim) * L1_final
-
-            if opt.lambda_dssim != 0:
-                L_dssim_final = 1.0 - ssim(render_final, gt_image, mask=mask)
-                loss += opt.lambda_final * opt.lambda_dssim * L_dssim_final
-
-            if opt.lambda_inpaint_aux != 0:
-                L1_inpaint = (1 - opt.lambda_dssim) * L1_inpaint
-                if opt.lambda_dssim != 0:
-                    L_dssim_inpaint = 1.0 - ssim(render_inpaint, gt_inpaint_image, mask=mask)
-                    L1_inpaint += opt.lambda_dssim * L_dssim_inpaint
-                loss += opt.lambda_inpaint_aux * L1_inpaint
-
-            Ll1 = L1_final
-            image_for_log = render_final
-            gt_for_log = gt_image
-            psnr_log = psnr_final
+        Ll1 = L1_final
+        image_for_log = render_final
+        gt_for_log = gt_image
+        psnr_log = psnr_final
 
         # depth loss
         if opt.lambda_depth != 0 and viewpoint_cam.original_depth is not None:
@@ -193,47 +153,9 @@ def training(dataset, hyper, opt, pipe, args):
 
             # L_depth = l1_loss(pred_depth, gt_depth, mask)
             L_depth = weighted_l1_loss(pred_depth, gt_depth, 1.0 - viewpoint_cam.final_conf.cuda(), mask)
-            # L_depth = compute_depth_loss(pred_depth, gt_depth, mask[0])
             loss += opt.lambda_depth * L_depth
         else:
             L_depth = torch.tensor(0.0, device="cuda")
-
-        # normal loss
-        if opt.lambda_normal != 0 and iteration > opt.start_normal_loss:
-            # L_normal = opt.alpha_normal * compute_normal_loss(render_pkg["normal"], gt_normal) + (1 - opt.alpha_normal) * compute_normal_loss(render_pkg["normal_ref"], gt_normal)
-            L_normal = compute_normal_loss(render_pkg["normal"], render_pkg["normal_ref"].detach())
-            loss += opt.lambda_normal * L_normal
-        else:
-            L_normal = torch.tensor(0.0, device="cuda")
-
-        # TV loss
-        if opt.lambda_tv_image != 0:
-            L_tv_image = TV_loss(image_for_log)
-            loss += opt.lambda_tv_image * L_tv_image
-        else:
-            L_tv_image = torch.tensor(0.0, device="cuda")
-
-        if opt.lambda_tv_depth != 0:
-            L_tv_depth = TV_loss(depth)
-            loss += opt.lambda_tv_depth * L_tv_depth
-        else:
-            L_tv_depth = torch.tensor(0.0, device="cuda")
-
-        # deformation regularization
-        # loss_pos, loss_cov = def_reg_loss(scene.gaussians, d_xyz, d_rotations, d_scales)
-        # surf_loss = surface_loss(gaussians, d_xyz)
-        # if opt.lambda_def_reg_pos != 0:
-        #     loss += opt.lambda_def_reg_pos * surf_loss
-
-        # loss_pos, loss_cov, loss_normal = surface_loss(scene.gaussians, d_xyz, d_rotations, d_scales, viewpoint_cam.camera_center.cuda())
-        # if opt.lambda_def_reg_pos != 0:
-        #     loss += opt.lambda_def_reg_pos * loss_pos
-
-        # if opt.lambda_def_reg_cov != 0:
-        #     loss += opt.lambda_def_reg_cov * loss_cov
-
-        # if opt.lambda_def_reg_pos != 0:
-        #     loss += opt.lambda_def_reg_pos * loss_normal
 
         sys_exit = False
         if loss.isnan():
@@ -289,40 +211,16 @@ def training(dataset, hyper, opt, pipe, args):
                 scene.save(iteration, 'fine')
 
             if iteration in args.test_iterations:
-                if iteration <= opt.warmup:
-                    print(
-                        f"[ITER {iteration}] "
-                        f"Phase: inpaint_warmup, "
-                        f"Total Loss: {loss.item():.7f}, "
-                        f"PSNR inpaint: {psnr_inpaint:.2f}, "
-                        f"L1 inpaint: {((1.0 - opt.lambda_dssim) * L1_inpaint).item():.7f}, "
-                        f"L_dssim_inpaint: {(opt.lambda_dssim * L_dssim_inpaint).item() if opt.lambda_dssim != 0 else 0:.7f}, "
-                        f"L_depth: {(opt.lambda_depth * L_depth).item() if opt.lambda_depth != 0 else 0:.7f}, "
-                        f"L_normal: {(opt.lambda_normal * L_normal).item() if opt.lambda_normal != 0 else 0:.7f}, "
-                        f"L_tv_image: {(opt.lambda_tv_image * L_tv_image).item() if opt.lambda_tv_image != 0 else 0:.7f}, "
-                        f"L_tv_depth: {(opt.lambda_tv_depth * L_tv_depth).item() if opt.lambda_tv_depth != 0 else 0:.7f}, "
-                        # f"L_def_reg_pos: {(opt.lambda_def_reg_pos * loss_normal).item() if opt.lambda_def_reg_pos != 0 else 0:.7f}, "
-                        # f"L_def_reg_cov: {(opt.lambda_def_reg_cov * loss_cov).item() if opt.lambda_def_reg_cov != 0 else 0:.7f}"
-                        # f"L_surface: {(opt.lambda_def_reg_pos * surf_loss).item() if opt.lambda_def_reg_pos != 0 else 0:.7f}, "
-                    )
-                else:
-                    print(
-                        f"[ITER {iteration}] "
-                        f"Phase: final_training, "
-                        f"Total Loss: {loss.item():.7f}, "
-                        f"PSNR inpaint: {psnr_inpaint:.2f}, "
-                        f"PSNR final: {psnr_final:.2f}, "
-                        f"L1 final: {(opt.lambda_final * (1.0 - opt.lambda_dssim) * L1_final).item():.7f}, "
-                        f"L_dssim_final: {(opt.lambda_final * opt.lambda_dssim * L_dssim_final).item() if opt.lambda_dssim != 0 else 0:.7f}, "
-                        f"L1 inpaint aux: {(opt.lambda_inpaint_aux * L1_inpaint).item() if opt.lambda_inpaint_aux != 0 else 0:.7f}, "
-                        f"L_depth: {(opt.lambda_depth * L_depth).item() if opt.lambda_depth != 0 else 0:.7f}, "
-                        f"L_normal: {(opt.lambda_normal * L_normal).item() if opt.lambda_normal != 0 else 0:.7f}, "
-                        f"L_tv_image: {(opt.lambda_tv_image * L_tv_image).item() if opt.lambda_tv_image != 0 else 0:.7f}, "
-                        f"L_tv_depth: {(opt.lambda_tv_depth * L_tv_depth).item() if opt.lambda_tv_depth != 0 else 0:.7f}, "
-                        # f"L_def_reg_pos: {(opt.lambda_def_reg_pos * loss_normal).item() if opt.lambda_def_reg_pos != 0 else 0:.7f}, "
-                        # f"L_def_reg_cov: {(opt.lambda_def_reg_cov * loss_cov).item() if opt.lambda_def_reg_cov != 0 else 0:.7f}"
-                        # f"L_surface: {(opt.lambda_def_reg_pos * surf_loss).item() if opt.lambda_def_reg_pos != 0 else 0:.7f}, "
-                    )
+                print(
+                    f"[ITER {iteration}] "
+                    f"Phase: final_training, "
+                    f"Total Loss: {loss.item():.7f}, "
+                    f"PSNR inpaint: {psnr_inpaint:.2f}, "
+                    f"PSNR final: {psnr_final:.2f}, "
+                    f"L final: {(opt.lambda_final * L1_final).item():.7f}, "
+                    f"L inpaint: {(opt.lambda_inpaint * L1_inpaint).item() if opt.lambda_inpaint != 0 else 0:.7f}, "
+                    f"L_depth: {(opt.lambda_depth * L_depth).item() if opt.lambda_depth != 0 else 0:.7f}, "
+                )
 
             if sys_exit:
                 sys.exit()
@@ -332,7 +230,6 @@ def training(dataset, hyper, opt, pipe, args):
             # -----------------------------------------------------------
 
             # Densification
-            # if iteration < opt.densify_until_iter and not in_phase2:
             if iteration < opt.densify_until_iter:
                 # Keep track of max radii in image-space for pruning
                 gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter], radii[visibility_filter])

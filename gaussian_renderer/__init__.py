@@ -17,7 +17,7 @@ from utils.bsdf_utils import bsdf_pbr_specular, _safe_normalize
 from utils.graphics_utils import render_normal
 
 
-def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, d_xyz, d_scales, d_rotations, iteration, opt, scaling_modifier = 1.0, override_color = None):
+def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, d_xyz, d_scales, d_rotations, scaling_modifier = 1.0, override_color = None):
     """
     Render the scene. 
     
@@ -85,7 +85,7 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
         colors_precomp = override_color
 
     # Rasterize visible Gaussians to image, obtain their radii (on screen). 
-    rendered_image, radii, depth = rasterizer(
+    rendered_inpaint, radii, depth = rasterizer(
         means3D = means3D,
         means2D = means2D,
         shs = shs,
@@ -94,40 +94,6 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
         scales = scales,
         rotations = rotations,
         cov3D_precomp = cov3D_precomp)
-
-    # Those Gaussians that were frustum culled or had a radius of 0 were not visible.
-    # They will be excluded from value updates used in the splitting criteria.
-    rendered_image = rendered_image.clamp(0, 1)
-    out = {
-        "render_inpaint": rendered_image,
-        "depth": depth,
-        "viewspace_points": screenspace_points,
-        "visibility_filter" : radii > 0,
-        "radii": radii,
-    }
-    
-    out_extras = {}
-        
-    out_extras["normal_ref"] = render_normal(depth=out['depth'][0], viewpoint_cam=viewpoint_camera)
-
-    normal = pc.get_normal(d_scales, d_rotations, viewpoint_camera.camera_center.cuda())
-    normal_normed = 0.5 * normal + 0.5
-    normal_map = rasterizer(
-        means3D = means3D,
-        means2D = means2D,
-        shs = None,
-        colors_precomp = normal_normed,
-        opacities = opacity,
-        scales = scales,
-        rotations = rotations,
-        cov3D_precomp = cov3D_precomp)[0]
-    out_extras["normal"] = normal_map
-    out_extras["normal"] = (out_extras["normal"] - 0.5) * 2. 
-    torch.nn.functional.normalize(out_extras["normal"], p=2, dim=0)
-
-    if iteration < opt.warmup:
-        out.update(out_extras)
-        return out
     
     specular = pc.get_specular
     roughness = pc.get_roughness
@@ -137,7 +103,7 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     normal = pc.get_normal(d_scales, d_rotations, wo)
     specular_color = bsdf_pbr_specular(specular, normal, wo, wi, roughness * roughness)
 
-    final_image = rasterizer(
+    rendered_final = rasterizer(
         means3D = means3D,
         means2D = means2D,
         shs = None,
@@ -148,9 +114,17 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
         cov3D_precomp = cov3D_precomp
     )[0]
 
-    out_extras["render_final"] = final_image
+    # Those Gaussians that were frustum culled or had a radius of 0 were not visible.
+    # They will be excluded from value updates used in the splitting criteria.
+    rendered_inpaint = rendered_inpaint.clamp(0, 1)
+    rendered_final = rendered_final.clamp(0, 1)
+    output = {
+        "render_inpaint": rendered_inpaint,
+        "render_final": rendered_final,
+        "depth": depth,
+        "viewspace_points": screenspace_points,
+        "visibility_filter" : radii > 0,
+        "radii": radii,
+    }
 
-    out.update(out_extras)
-
-    return out
-
+    return output

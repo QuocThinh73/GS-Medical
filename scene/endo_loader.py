@@ -24,6 +24,7 @@ import torch
 import torch.nn.functional as F
 from utils.general_utils import inpaint_depth, inpaint_rgb
 
+
 def generate_se3_matrix(translation, rotation_rad):
     # Create rotation matrices around x, y, and z axes
     Rx = np.array([[1, 0, 0],
@@ -251,7 +252,11 @@ class EndoNeRF_Dataset(object):
     
     def get_sparse_pts(self, sample=True):
         R, T = self.image_poses[0]
+
         depth = np.array(Image.open(self.depth_paths[0]))
+        specular_mask = 1 - np.array(Image.open(self.specular_mask_paths[0])) / 255.0
+        filling_mask = np.logical_not(specular_mask)
+        depth = inpaint_depth(depth, filling_mask)
         depth_mask = np.ones(depth.shape).astype(np.float32)
         close_depth = np.percentile(depth[depth!=0], 0.1)
         inf_depth = np.percentile(depth[depth!=0], 99.9)
@@ -259,7 +264,7 @@ class EndoNeRF_Dataset(object):
         depth_mask[np.bitwise_and(depth<close_depth, depth!=0)] = 0
         depth_mask[depth==0] = 0
         depth[depth_mask==0] = 0
-        specular_mask = 1 - np.array(Image.open(self.specular_mask_paths[0])) / 255.0
+        
         if 'stereomis' in self.root_dir.lower():
             mask = np.array(Image.open(self.masks_paths[0]))
             if len(mask.shape) > 2:
@@ -269,18 +274,23 @@ class EndoNeRF_Dataset(object):
         mask = np.logical_and(depth_mask, mask)
         
         color = np.array(Image.open(self.inpaint_image_paths[0]))/255.0
-
-        color_uint8 = np.array(Image.open(self.inpaint_image_paths[0]), dtype=np.uint8)
-        filling_mask = np.logical_not(specular_mask)
-        # color, depth = self.filling_pts_colors(ref_image=color_uint8, ref_depth=depth, filling_mask=filling_mask)
-        # color = color/255.0
-        _, depth = self.filling_pts_colors(ref_image=color_uint8, ref_depth=depth, filling_mask=filling_mask)
         
         pts, colors, _ = self.get_pts_cam(depth, mask, color, disable_mask=False)
         c2w = self.get_camera_poses((R, T))
         pts = self.transform_cam2cam(pts, c2w)
         
-        pts, colors = self.search_pts_colors_with_motion(pts, colors, mask, c2w)
+        # pts, colors = self.search_pts_colors_with_motion(pts, colors, mask, c2w)
+
+        ref_depth_anchor = depth.copy()
+
+        pts, colors = self.search_pts_colors_with_motion_surface_anchor(
+            ref_pts=pts,
+            ref_color=colors,
+            ref_mask=mask,
+            ref_c2w=c2w,
+            ref_depth_anchor=ref_depth_anchor,
+            ref_color_anchor=color,
+        )
         
         normals = np.zeros((pts.shape[0], 3))
 
@@ -293,7 +303,7 @@ class EndoNeRF_Dataset(object):
         
         return pts, colors, normals
 
-    def calculate_motion_masks(self, ):
+    def calculate_motion_masks_old(self, ):
         images = []
         for j in range(0, len(self.image_poses)):
             color = np.array(Image.open(self.image_paths[j]))/255.0
@@ -302,10 +312,58 @@ class EndoNeRF_Dataset(object):
         diff_map = np.abs(images - images.mean(axis=0))
         diff_thrshold = np.percentile(diff_map[diff_map!=0], 95)
         return diff_map > diff_thrshold
+    
+    def calculate_motion_masks(self, ):
+        num_frames = len(self.image_poses)
+
+        # color
+        color_images = []
+        for i in range(num_frames):
+            rgb_color = np.array(Image.open(self.inpaint_image_paths[i])).astype(np.float32) / 255.0
+            gray_color = cv2.cvtColor(rgb_color, cv2.COLOR_RGB2GRAY)
+            color_images.append(gray_color)
+        color_images = np.asarray(color_images).astype(np.float32)
+        mean_color_image = color_images.mean(axis=0)
+        color_diff_map = np.abs(color_images - mean_color_image)
+        color_diff_thrshold = np.percentile(color_diff_map[color_diff_map!=0], 95)
+
+        # depth
+        depth_maps = []
+        depth_masks = []
+        for i in range(num_frames):
+            depth = np.array(Image.open(self.depth_paths[i])).astype(np.float32)
+
+            specular_mask = 1 - np.array(Image.open(self.specular_mask_paths[i])) / 255.0
+            filling_mask = np.logical_not(specular_mask)
+            depth = inpaint_depth(depth, filling_mask).astype(np.float32)
+
+            depth_mask = np.ones(depth.shape).astype(np.float32)
+            close_depth = np.percentile(depth[depth!=0], 0.1)
+            inf_depth = np.percentile(depth[depth!=0], 99.9)
+            depth_mask[depth>inf_depth] = 0
+            depth_mask[np.bitwise_and(depth<close_depth, depth!=0)] = 0
+            depth_mask[depth==0] = 0
+            depth[depth_mask==0] = 0
+
+            depth_maps.append(depth)
+            depth_masks.append(depth_mask)
+
+        depth_maps = np.asarray(depth_maps).astype(np.float32)
+        depth_masks = np.asarray(depth_masks).astype(np.float32)
+
+        mean_depth_map = np.mean(depth_maps, axis=0)
+
+        depth_diff_map = np.abs(depth_maps - mean_depth_map)
+        depth_diff_threshold = np.percentile(depth_diff_map[depth_diff_map!=0], 95)
+
+        color_motion_mask = color_diff_map > color_diff_thrshold
+        depth_motion_mask = (depth_masks > 0) & (depth_diff_map > depth_diff_threshold)
+
+        return color_motion_mask | depth_motion_mask
         
     def search_pts_colors_with_motion(self, ref_pts, ref_color, ref_mask, ref_c2w):
         # calculating the motion mask
-        motion_mask = self.calculate_motion_masks()
+        motion_mask = self.calculate_motion_masks_old()
         interval = 1
         if len(self.image_poses) > 150: # in case long sequence
             interval = 2
@@ -371,6 +429,163 @@ class EndoNeRF_Dataset(object):
             ref_color = ref_color[sel_idxs] 
         return ref_pts, ref_color
     
+    def search_pts_colors_with_motion_surface_anchor(self, ref_pts, ref_color, ref_mask, ref_c2w, ref_depth_anchor, ref_color_anchor, ratio=0.3, k=1, alpha_min=0.25, alpha_max=0.75):
+        H = self.img_wh[1]
+        W = self.img_wh[0]
+
+        fx = self.focal[0]
+        fy = self.focal[1]
+        cx = self.K[0, -1]
+        cy = self.K[1, -1]
+
+        motion_masks = self.calculate_motion_masks().astype(bool)
+
+        # ------------------------------------------------------------
+        # 2. Frame-0 valid anchor conditions
+        # ------------------------------------------------------------
+        # Convention in your code:
+        #   specular_mask = 1 - png / 255.0
+        #   True  / 1 = non-specular
+        #   False / 0 = specular
+        ref_specular_mask = 1 - np.array(Image.open(self.specular_mask_paths[0])) / 255.0
+        ref_non_specular = ref_specular_mask.astype(bool)
+
+        valid_ref_depth = ref_depth_anchor > 0
+        ref_valid_mask = ref_mask.astype(bool)
+
+        # A pixel can be used as an anchor only if it is valid in frame 0.
+        valid_anchor_mask = (
+            ref_valid_mask &
+            valid_ref_depth &
+            ref_non_specular
+        )
+
+        # ------------------------------------------------------------
+        # 3. Process each frame's motion mask
+        # ------------------------------------------------------------
+        interval = 1
+        if len(self.image_poses) > 150:
+            interval = 2
+
+        for j in range(1, len(self.image_poses), interval):
+
+            # --------------------------------------------------------
+            # 3.1. Dense candidates from motion mask of frame j
+            # --------------------------------------------------------
+            motion_mask_j = motion_masks[j]
+
+            # Use frame-j motion signal, but anchor must exist in frame 0.
+            dense_mask_j = motion_mask_j & valid_anchor_mask
+
+            y_keep, x_keep = np.where(dense_mask_j)
+
+            if y_keep.shape[0] == 0:
+                continue
+
+            # --------------------------------------------------------
+            # 3.2. Sample anchor pixels from this frame's dense mask
+            # --------------------------------------------------------
+            num_anchor = int(ratio * y_keep.shape[0])
+
+            if num_anchor <= 0:
+                continue
+
+            num_anchor = min(num_anchor, y_keep.shape[0])
+
+            sel_idxs = np.random.choice(
+                y_keep.shape[0],
+                num_anchor,
+                replace=False,
+            )
+
+            y_keep = y_keep[sel_idxs]
+            x_keep = x_keep[sel_idxs]
+
+            # --------------------------------------------------------
+            # 3.3. Back-project frame-0 anchor pixels
+            # --------------------------------------------------------
+            z_anchor = ref_depth_anchor[y_keep, x_keep].copy()
+            z_anchor = np.maximum(z_anchor, 1e-6)
+
+            X_anchor = (x_keep.astype(np.float32) - cx) / fx * z_anchor
+            Y_anchor = (y_keep.astype(np.float32) - cy) / fy * z_anchor
+            Z_anchor = z_anchor
+
+            anchor_pts_ref = np.stack(
+                [X_anchor, Y_anchor, Z_anchor],
+                axis=-1,
+            )
+
+            # reference camera -> world
+            anchor_pts_world = self.transform_cam2cam(anchor_pts_ref, ref_c2w)
+
+            # Anchor color from frame-0 inpaint image
+            anchor_colors = ref_color_anchor[y_keep, x_keep]
+
+            # --------------------------------------------------------
+            # 3.4. Build KNN over current Gaussian cloud
+            # --------------------------------------------------------
+            if ref_pts.shape[0] == 0:
+                continue
+
+            pcd = o3d.geometry.PointCloud()
+            pcd.points = o3d.utility.Vector3dVector(ref_pts.astype(np.float64))
+            kdtree = o3d.geometry.KDTreeFlann(pcd)
+
+            pts_add_list = []
+            color_add_list = []
+
+            # Query K+1 because nearest neighbor can be the same point as anchor.
+            query_k = min(k + 1, ref_pts.shape[0])
+
+            for i in range(anchor_pts_world.shape[0]):
+                p_anchor = anchor_pts_world[i]
+                c_anchor = anchor_colors[i]
+
+                _, idxs, _ = kdtree.search_knn_vector_3d(
+                    p_anchor.astype(np.float64),
+                    query_k,
+                )
+
+                idxs = list(idxs)
+
+                if len(idxs) == 0:
+                    continue
+
+                # Skip nearest one if possible to reduce duplicate points.
+                if len(idxs) > k:
+                    neighbor_idxs = idxs[1:k + 1]
+                else:
+                    neighbor_idxs = idxs[:k]
+
+                for neighbor_idx in neighbor_idxs:
+                    p_neighbor = ref_pts[neighbor_idx]
+                    c_neighbor = ref_color[neighbor_idx]
+
+                    alpha = np.random.uniform(alpha_min, alpha_max)
+
+                    p_new = (1.0 - alpha) * p_anchor + alpha * p_neighbor
+                    c_new = (1.0 - alpha) * c_anchor + alpha * c_neighbor
+
+                    pts_add_list.append(p_new)
+                    color_add_list.append(c_new)
+
+            if len(pts_add_list) == 0:
+                continue
+
+            pts_add_world = np.stack(pts_add_list, axis=0)
+            color_add = np.stack(color_add_list, axis=0)
+
+            ref_pts = np.concatenate((ref_pts, pts_add_world), axis=0)
+            ref_color = np.concatenate((ref_color, color_add), axis=0)
+
+            if ref_pts.shape[0] > 600000:
+                sel_idxs = np.random.choice(ref_pts.shape[0], 600000, replace=False)
+                ref_pts = ref_pts[sel_idxs]
+                ref_color = ref_color[sel_idxs]
+                break
+
+        return ref_pts, ref_color
          
     def get_camera_poses(self, pose_tuple):
         R, T = pose_tuple
