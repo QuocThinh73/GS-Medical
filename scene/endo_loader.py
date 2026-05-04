@@ -440,41 +440,25 @@ class EndoNeRF_Dataset(object):
 
         motion_masks = self.calculate_motion_masks().astype(bool)
 
-        # ------------------------------------------------------------
-        # 2. Frame-0 valid anchor conditions
-        # ------------------------------------------------------------
-        # Convention in your code:
-        #   specular_mask = 1 - png / 255.0
-        #   True  / 1 = non-specular
-        #   False / 0 = specular
         ref_specular_mask = 1 - np.array(Image.open(self.specular_mask_paths[0])) / 255.0
         ref_non_specular = ref_specular_mask.astype(bool)
 
         valid_ref_depth = ref_depth_anchor > 0
         ref_valid_mask = ref_mask.astype(bool)
 
-        # A pixel can be used as an anchor only if it is valid in frame 0.
         valid_anchor_mask = (
             ref_valid_mask &
             valid_ref_depth &
             ref_non_specular
         )
 
-        # ------------------------------------------------------------
-        # 3. Process each frame's motion mask
-        # ------------------------------------------------------------
         interval = 1
         if len(self.image_poses) > 150:
             interval = 2
 
         for j in range(1, len(self.image_poses), interval):
-
-            # --------------------------------------------------------
-            # 3.1. Dense candidates from motion mask of frame j
-            # --------------------------------------------------------
             motion_mask_j = motion_masks[j]
 
-            # Use frame-j motion signal, but anchor must exist in frame 0.
             dense_mask_j = motion_mask_j & valid_anchor_mask
 
             y_keep, x_keep = np.where(dense_mask_j)
@@ -482,9 +466,6 @@ class EndoNeRF_Dataset(object):
             if y_keep.shape[0] == 0:
                 continue
 
-            # --------------------------------------------------------
-            # 3.2. Sample anchor pixels from this frame's dense mask
-            # --------------------------------------------------------
             num_anchor = int(ratio * y_keep.shape[0])
 
             if num_anchor <= 0:
@@ -501,9 +482,6 @@ class EndoNeRF_Dataset(object):
             y_keep = y_keep[sel_idxs]
             x_keep = x_keep[sel_idxs]
 
-            # --------------------------------------------------------
-            # 3.3. Back-project frame-0 anchor pixels
-            # --------------------------------------------------------
             z_anchor = ref_depth_anchor[y_keep, x_keep].copy()
             z_anchor = np.maximum(z_anchor, 1e-6)
 
@@ -515,16 +493,9 @@ class EndoNeRF_Dataset(object):
                 [X_anchor, Y_anchor, Z_anchor],
                 axis=-1,
             )
-
-            # reference camera -> world
             anchor_pts_world = self.transform_cam2cam(anchor_pts_ref, ref_c2w)
-
-            # Anchor color from frame-0 inpaint image
             anchor_colors = ref_color_anchor[y_keep, x_keep]
 
-            # --------------------------------------------------------
-            # 3.4. Build KNN over current Gaussian cloud
-            # --------------------------------------------------------
             if ref_pts.shape[0] == 0:
                 continue
 
@@ -535,7 +506,6 @@ class EndoNeRF_Dataset(object):
             pts_add_list = []
             color_add_list = []
 
-            # Query K+1 because nearest neighbor can be the same point as anchor.
             query_k = min(k + 1, ref_pts.shape[0])
 
             for i in range(anchor_pts_world.shape[0]):
@@ -552,7 +522,6 @@ class EndoNeRF_Dataset(object):
                 if len(idxs) == 0:
                     continue
 
-                # Skip nearest one if possible to reduce duplicate points.
                 if len(idxs) > k:
                     neighbor_idxs = idxs[1:k + 1]
                 else:

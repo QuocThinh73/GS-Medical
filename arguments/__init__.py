@@ -125,24 +125,12 @@ class OptimizationParams(ParamGroup):
         self.opacity_threshold_fine_after = 0.005
 
         # losses params
-        self.lambda_inpaint_aux = 1.0
+        self.lambda_inpaint = 1.0
         self.lambda_final = 1.0
-        self.lambda_dssim = 0.0
         self.lambda_depth = 1.0
-        self.lambda_tv_image = 0.00
-        self.lambda_tv_depth = 0.00
-        self.lambda_def_reg_pos = 0.0
-        self.lambda_def_reg_cov = 0.0
-        self.lambda_normal = 0.0
 
         self.specular_lr = 0.0002
         self.roughness_lr = 0.0002
-
-        # iteration
-        self.warmup = 0
-        self.warmup2 = 0
-        self.warmup3 = 0
-        self.start_normal_loss = 3000
         
         super().__init__(parser, "Optimization Parameters")
 

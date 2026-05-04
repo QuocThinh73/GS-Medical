@@ -118,7 +118,6 @@ def training(dataset, hyper, opt, pipe, args):
         gt_image = viewpoint_cam.original_image.cuda()
         gt_inpaint_image = viewpoint_cam.inpaint_image.cuda()
         mask = viewpoint_cam.mask.cuda()
-        gt_normal = viewpoint_cam.original_normal.cuda()
 
         render_inpaint = render_pkg["render_inpaint"]
         render_final = render_pkg["render_final"]
@@ -179,7 +178,7 @@ def training(dataset, hyper, opt, pipe, args):
                 progress_bar.set_postfix({
                     "Loss": f"{loss.item():.7f}",
                     "psnr_inpaint": f"{psnr_inpaint:.2f}",
-                    "psnr_final": f"{psnr_final:.2f}" if iteration > opt.warmup else "N/A",
+                    "psnr_final": f"{psnr_final:.2f}",
                     "point": f"{total_point}"
                 })
                 progress_bar.update(10)
